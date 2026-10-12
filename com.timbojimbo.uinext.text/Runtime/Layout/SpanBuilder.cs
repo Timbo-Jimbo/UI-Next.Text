@@ -38,14 +38,10 @@ namespace TimboJimbo.UINext.Text
     /// </summary>
     internal static class SpanBuilder
     {
-        /// <summary>
-        /// The size of a block's placeholder and of the line break after it: so small the line it is on is as tall as the
-        /// block alone.
-        /// </summary>
-        internal const float BlockLineSizePx = 1f;
-
-        // The least a placeholder is, either way: the generator takes a size of 0 for none.
-        private const float MinPlaceholderPx = 1f / 64f;
+        // The least a placeholder is tall, in em of the text: the engine sizes a sprite to a height and keeps the aspect of
+        // its metrics, and one much shorter than its text comes out far too wide (a block 381 points wide and a 64th of a
+        // point tall came out 256 times as wide).
+        private const float MinPlaceholderEm = 0.5f;
 
         private static readonly List<TextStyle> s_styles = new();
         private static readonly List<int> s_taps = new();
@@ -87,36 +83,34 @@ namespace TimboJimbo.UINext.Text
                 {
                     case LayoutRunKind.Element:
                     {
-                        // In the size and font of the span it is in, sitting in its line as its rule says.
+                        // Sitting in its line as its rule says, centred on the text of the span it is in. The sprite itself
+                        // keeps the text's own size and font, which the engine sizes sprites by as it has been seen to.
                         var match = matches[run.Match];
                         var around = match.Parent >= 0 ? s_styles[match.Parent] : TextStyle.Plain;
-                        var font = FontOf(in around, baseFont);
                         float sizePx = baseSizePx * ScaleOf(in around);
-                        var size = SizeOf(sizes, run.Match, new Vector2(sizePx, sizePx));
+                        var size = SizeOf(sizes, run.Match, Vector2.zero);
+                        float height = Tall(size.y, sizePx);
                         span.Sprite = AtgSpriteAssets.Placeholder;
-                        span.SpriteWidthPx = Mathf.Max(size.x, MinPlaceholderPx);
-                        span.SpriteHeightPx = Mathf.Max(AbovePx(match.Rule.Alignment, size.y, font, sizePx), MinPlaceholderPx);
-                        if (font != baseFont) span.Font = font;
-                        if (!Mathf.Approximately(sizePx, baseSizePx)) span.FontSizePx = sizePx;
+                        span.SpriteWidthPx = Mathf.Max(size.x, 1f);
+                        span.SpriteHeightPx = Mathf.Max(AbovePx(match.Rule.Alignment, height, FontOf(in around, baseFont), sizePx), MinPlaceholderEm * sizePx);
                         span.LinkId = match.Parent >= 0 ? s_taps[match.Parent] : -1;
                         buffer.Add(span);
                         continue;
                     }
                     case LayoutRunKind.Block:
                     {
-                        // Alone on a line of the smallest text, so the line is as tall as the block: the engine stands a
-                        // sprite on the baseline, and the line takes the rest of its height from its text.
+                        // Alone on its line, as tall as the block, standing on the baseline. Its width is the block's own, kept
+                        // out of the text's (what draws it puts it across the width): the sprite is no wider than the block,
+                        // nor than it is tall.
                         var size = SizeOf(sizes, run.Match, Vector2.zero);
+                        float height = Tall(size.y, baseSizePx);
                         span.Sprite = AtgSpriteAssets.Placeholder;
-                        span.SpriteWidthPx = Mathf.Max(size.x, MinPlaceholderPx);
-                        span.SpriteHeightPx = Mathf.Max(size.y, MinPlaceholderPx);
-                        span.FontSizePx = BlockLineSizePx;
+                        span.SpriteWidthPx = Mathf.Clamp(size.x, 1f, height);
+                        span.SpriteHeightPx = height;
                         buffer.Add(span);
                         continue;
                     }
                     case LayoutRunKind.BlockEnd:
-                        span.FontSizePx = BlockLineSizePx;
-                        buffer.Add(span);
                         continue;
                 }
 
@@ -219,6 +213,10 @@ namespace TimboJimbo.UINext.Text
         }
 
         private static float ScaleOf(in TextStyle style) => style.Scale > 0f ? style.Scale : 1f;
+
+        // A placeholder's height for an object `height` tall in text `sizePx` big: a line's worth while layout has not given
+        // it one yet (widths are shared out before heights), and never much shorter than the text.
+        private static float Tall(float height, float sizePx) => Mathf.Max(height > 0f ? height : sizePx, MinPlaceholderEm * sizePx);
 
         private static Vector2 SizeOf(IReadOnlyList<Vector2> sizes, int match, Vector2 fallback) =>
             sizes != null && match < sizes.Count ? sizes[match] : fallback;

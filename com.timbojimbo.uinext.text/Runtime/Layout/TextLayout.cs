@@ -406,7 +406,9 @@ namespace TimboJimbo.UINext.Text
             }
             var box = _objectQuads[found].Box;
             var size = match < _objectSizes.Count ? _objectSizes[match] : box.size;
-            rect = new Rect(box.x, box.y, size.x, Mathf.Max(size.y, box.height));
+            // A block starts at the line's start, whatever the alignment stood its sprite at: it goes across the width.
+            float x = Document.Matches[match].Role == TextRole.Block ? 0f : box.x;
+            rect = new Rect(x, box.y, size.x, Mathf.Max(size.y, box.height));
             return true;
         }
 
@@ -455,7 +457,8 @@ namespace TimboJimbo.UINext.Text
         /// <summary>
         /// The size a text would take laid out from an input, in layout pixels: at its width (negative for unconstrained)
         /// with its wrapping, spacing, markup and objects, and no taller than <see cref="TextLayoutInput.MaxLines"/> lines
-        /// of its font; its height is not a constraint. Re-entrant, so what is measured may measure text of its own.
+        /// of its font; its height is not a constraint. A block is as wide as it is, at least. Re-entrant, so what is
+        /// measured may measure text of its own.
         /// </summary>
         public static Vector2 Measure(in TextLayoutInput input)
         {
@@ -466,7 +469,19 @@ namespace TimboJimbo.UINext.Text
             {
                 AtgEngine.Initialize();
                 var settings = scope.Settings(in input, null);
-                var size = scope._handle.MeasurePx(ref settings);
+                Vector2 size;
+                if (scope._layoutText.ObjectCount > 0)
+                {
+                    // Text with objects in it is measured as it is laid out, so it fits the box it is measured for: what is
+                    // laid out there is laid out the same way.
+                    scope._handle.Generate(ref settings);
+                    size = scope._handle.SizePx;
+                    size.x = Mathf.Max(size.x, scope.WidestBlock(input.ObjectSizes));
+                }
+                else
+                {
+                    size = scope._handle.MeasurePx(ref settings);
+                }
                 // As many lines as a layout keeps (see ApplyOverflow).
                 if (input.MaxLines > 0 && scope._baseFont != null)
                     size.y = Mathf.Min(size.y, AtgFontAssets.LineHeightPx(scope._baseFont, input.FontSizePx) * input.MaxLines);
@@ -519,12 +534,24 @@ namespace TimboJimbo.UINext.Text
                         widest = Mathf.Max(widest, right - left);
                     start = -1;
                 }
-                return widest;
+                // A block is its own width, not its placeholder's.
+                return Mathf.Max(widest, scope.WidestBlock(input.ObjectSizes));
             }
             finally
             {
                 s_measureDepth--;
             }
+        }
+
+        // The widest of the blocks laid out, by their sizes: what the text is as wide as, at least.
+        private float WidestBlock(IReadOnlyList<Vector2> sizes)
+        {
+            float widest = 0f;
+            if (sizes == null) return widest;
+            foreach (var run in _layoutText.Runs)
+                if (run.Kind == LayoutRunKind.Block && run.Match < sizes.Count)
+                    widest = Mathf.Max(widest, sizes[run.Match].x);
+            return widest;
         }
 
         // Whether a line may break at a character of the layout text: a space, but not a no-break space (U+00A0, which
