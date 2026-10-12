@@ -282,7 +282,6 @@ namespace TimboJimbo.UINext.Text
             {
                 case TextOverflow.Ellipsis:
                     height = input.HeightPx;
-                    settings.Overflow = AtgOverflow.Ellipsis;
                     break;
                 case TextOverflow.Truncate:
                     height = input.HeightPx;
@@ -313,6 +312,12 @@ namespace TimboJimbo.UINext.Text
                 if (input.HeightPx > height)
                     _topPx = (input.HeightPx - height) * ((int)input.Alignment / 3) * 0.5f;
             }
+
+            // An ellipsis where there is something to cut short: lines past a height, or one line at its width. With neither,
+            // the engine, told to, breaks words at any character to make lines (#design after its #), as wrapping text
+            // without a height to cut at must not.
+            if (input.Overflow == TextOverflow.Ellipsis && (height >= 0f || !input.WordWrap))
+                settings.Overflow = AtgOverflow.Ellipsis;
 
             settings.HeightPx = height;
         }
@@ -406,9 +411,16 @@ namespace TimboJimbo.UINext.Text
             }
             var box = _objectQuads[found].Box;
             var size = match < _objectSizes.Count ? _objectSizes[match] : box.size;
-            // A block starts at the line's start, whatever the alignment stood its sprite at: it goes across the width.
-            float x = Document.Matches[match].Role == TextRole.Block ? 0f : box.x;
-            rect = new Rect(x, box.y, size.x, Mathf.Max(size.y, box.height));
+            if (Document.Matches[match].Role == TextRole.Block)
+            {
+                // A block goes across the width from the top of its line, which the line break after it makes as tall as
+                // it (see SpanBuilder): the engine stands its placeholder on the baseline, wherever the alignment puts it.
+                _layoutText.TryGetRange(match, out int at, out _);
+                _handle.GetRangeRects(at, at + 1, _rects);
+                rect = new Rect(0f, _rects.Count > 0 ? _rects[0].y : box.y, size.x, size.y);
+                return true;
+            }
+            rect = new Rect(box.x, box.y, size.x, Mathf.Max(size.y, box.height));
             return true;
         }
 
@@ -477,6 +489,7 @@ namespace TimboJimbo.UINext.Text
                     scope._handle.Generate(ref settings);
                     size = scope._handle.SizePx;
                     size.x = Mathf.Max(size.x, scope.WidestBlock(input.ObjectSizes));
+                    size.y = Mathf.Max(size.y, scope.BlocksBottom(input.ObjectSizes));
                 }
                 else
                 {
@@ -541,6 +554,22 @@ namespace TimboJimbo.UINext.Text
             {
                 s_measureDepth--;
             }
+        }
+
+        // How far down the blocks laid out reach, each from the top of its line: past the text's own height for a block it
+        // ends with, which has no line break after it to make its line as tall as it.
+        private float BlocksBottom(IReadOnlyList<Vector2> sizes)
+        {
+            float bottom = 0f;
+            if (sizes == null) return bottom;
+            foreach (var run in _layoutText.Runs)
+            {
+                if (run.Kind != LayoutRunKind.Block || run.Match >= sizes.Count) continue;
+                _handle.GetRangeRects(run.Start, run.Start + 1, _rects);
+                if (_rects.Count > 0)
+                    bottom = Mathf.Max(bottom, _rects[0].y + sizes[run.Match].y);
+            }
+            return bottom;
         }
 
         // The widest of the blocks laid out, by their sizes: what the text is as wide as, at least.

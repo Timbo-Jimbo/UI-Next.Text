@@ -99,19 +99,27 @@ namespace TimboJimbo.UINext.Text
                     }
                     case LayoutRunKind.Block:
                     {
-                        // Alone on its line, as tall as the block, standing on the baseline. Its width is the block's own, kept
-                        // out of the text's (what draws it puts it across the width): the sprite is no wider than the block,
-                        // nor than it is tall.
+                        // A mark alone on its line: the engine stands a sprite on the baseline without making its line any
+                        // taller, so it is the line break after it that makes room for the block. Its width is the block's
+                        // own, kept out of the text's (what draws it puts it across the width).
                         var size = SizeOf(sizes, run.Match, Vector2.zero);
-                        float height = Tall(size.y, baseSizePx);
                         span.Sprite = AtgSpriteAssets.Placeholder;
-                        span.SpriteWidthPx = Mathf.Clamp(size.x, 1f, height);
-                        span.SpriteHeightPx = height;
+                        span.SpriteWidthPx = Mathf.Clamp(size.x, 1f, baseSizePx);
+                        span.SpriteHeightPx = MinPlaceholderEm * baseSizePx;
+                        span.LineHeightPx = size.y > 0f ? size.y : baseSizePx;
                         buffer.Add(span);
                         continue;
                     }
                     case LayoutRunKind.BlockEnd:
+                    {
+                        // The line break after a block: the engine starts the next line its line height below the top of the
+                        // line it ends, which makes the block's line as tall as the block (a line's worth until layout has
+                        // given the block a height).
+                        var size = SizeOf(sizes, run.Match, Vector2.zero);
+                        span.LineHeightPx = size.y > 0f ? size.y : baseSizePx;
+                        buffer.Add(span);
                         continue;
+                    }
                 }
 
                 // Text and padding, in the style of the span they are in.

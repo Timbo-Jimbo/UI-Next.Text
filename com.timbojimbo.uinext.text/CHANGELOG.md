@@ -4,10 +4,14 @@
 
 - Markup is read by rules: a `TextRule` has a trigger, the characters around the text it takes (wrapped, prefix, line, merging a run of lines, fenced, link, or a pattern), and a role, how what it takes is shown (a span, an element or a block); a `TextRuleSet` holds them in order, and at each place the first that matches, and accepts what it found, takes it. Spans nest, and a literal rule keeps what it wraps from the rest. Markdown is no longer built in: UI Next's built-in Markdown is a set of rules like any other.
 - `TextDocument` holds what the rules matched (`TextMatch`: the source range, the text, the argument, the span it is in), read by `TextDocument.Parse`. `TextLayoutInput.Markup` (null for plain text) replaces `RichText` and `Theme`, `TextLayoutInput.Document` lays out a text read already, and `TextLayoutInput.ObjectSizes` sizes elements and blocks.
-- Elements and blocks take exactly the room what draws the text gives them: an element stands in its line, on the baseline or centred on the text, and a block has a line of its own, as tall as it is with the text's descent below it; a text holding either is measured by laying it out, as it is drawn. `TextLayout.TryGetObjectRect` says where each went, `GetMatchRects` gives a span's pieces of its lines, and `MatchAt` the tappable span under a point, in place of `LinkAt`.
+- Elements and blocks take exactly the room what draws the text gives them: an element stands in its line, on the baseline or centred on the text, and a block has a line of its own, as tall as it is: the engine makes no line taller for what stands in it, so the line break after a block takes the block's height as its line height. A text holding either is measured by laying it out, as it is drawn. `TextLayout.TryGetObjectRect` says where each went, `GetMatchRects` gives a span's pieces of its lines, and `MatchAt` the tappable span under a point, in place of `LinkAt`.
 - A colour a span gives its text is its own: `TextLayout.TextColor` marks the text's own colour, which is what a tint colours.
 - `TextSettings.DefaultMarkup` replaces `DefaultTheme`; `Generate`, `Measure` and `LongestWord` take no `InlineContext`.
 - `TextTrigger` fields show in the inspector only where their kind uses them.
+
+### Fixed
+
+- Wrapped text given an ellipsis but no height broke its words at any character: the engine, told to ellipsize with nothing to cut short, makes lines that way. It is told only where there is a height to cut at, or one line to cut at its width.
 
 ### Removed
 
