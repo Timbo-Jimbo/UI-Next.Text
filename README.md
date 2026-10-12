@@ -8,7 +8,7 @@ Requires Unity 6000.5 or newer, mobile or desktop.
 
 ## Installation
 
-Open **Window > Package Manager**, click Add, choose **Add package from git URL...** and paste `https://github.com/Timbo-Jimbo/UI-Next.Text.git?path=com.timbojimbo.uinext.text#0.1.1`. UI Next depends on it, so add it before UI Next.
+Open **Window > Package Manager**, click Add, choose **Add package from git URL...** and paste `https://github.com/Timbo-Jimbo/UI-Next.Text.git?path=com.timbojimbo.uinext.text#0.2.0`. UI Next depends on it, so add it before UI Next.
 
 ## How it works
 
