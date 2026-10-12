@@ -54,12 +54,16 @@ namespace TimboJimbo.UINext.Text
     }
 
     /// <summary>
-    /// A prefab to place over part of the laid-out text. The rectangle and metrics are layout pixels, y down
-    /// from the layout's top-left corner.
+    /// What to put over or behind part of the laid-out text: a prefab, or a background the renderer draws itself (an
+    /// <see cref="InlineBackground"/> handler, with no prefab). The rectangle and metrics are layout pixels, y down from
+    /// the layout's top-left corner.
     /// </summary>
     public struct InlinePlacementRequest
     {
         public int TokenIndex;
+        /// <summary>The handler that asked for it.</summary>
+        public InlineHandler Handler;
+        /// <summary>What to place, or null for a background the renderer draws (<see cref="Handler"/> is an InlineBackground).</summary>
         public GameObject Prefab;
         /// <summary>True for backgrounds, drawn under the glyphs; false for objects, drawn over them.</summary>
         public bool BelowGlyphs;
@@ -352,7 +356,10 @@ namespace TimboJimbo.UINext.Text
             }
         }
 
-        /// <summary>The prefabs the current layout wants placed, from the theme's handlers.</summary>
+        /// <summary>
+        /// What the current layout wants placed, from the theme's handlers: their prefabs, and the backgrounds of
+        /// <see cref="InlineBackground"/> handlers.
+        /// </summary>
         public void CollectPlacements(in InlineContext context, List<InlinePlacementRequest> results)
         {
             results.Clear();
@@ -384,14 +391,14 @@ namespace TimboJimbo.UINext.Text
                     box.height = Mathf.Max(above, size.y * _fontSizePx);
                     results.Add(new InlinePlacementRequest
                     {
-                        TokenIndex = i, Prefab = request.Prefab, BelowGlyphs = false, Px = box, Index = 0, Count = 1,
+                        TokenIndex = i, Handler = handler, Prefab = request.Prefab, BelowGlyphs = false, Px = box, Index = 0, Count = 1,
                         BaselinePx = above, AscentPx = above, DescentPx = box.height - above,
                     });
                     continue;
                 }
 
                 var req = handler.Request(in token, in context);
-                if (req.Prefab == null)
+                if (req.Prefab == null && handler is not InlineBackground)
                     continue;
                 _handle.GetRangeRects(placed.Start, placed.End, _rects);
                 int count = _rects.Count;
@@ -409,7 +416,7 @@ namespace TimboJimbo.UINext.Text
                     }
                     results.Add(new InlinePlacementRequest
                     {
-                        TokenIndex = i, Prefab = req.Prefab, BelowGlyphs = true, Px = new Rect(0f, yMin, layoutWidth, yMax - yMin), Index = 0, Count = 1,
+                        TokenIndex = i, Handler = handler, Prefab = req.Prefab, BelowGlyphs = true, Px = new Rect(0f, yMin, layoutWidth, yMax - yMin), Index = 0, Count = 1,
                         BaselinePx = _rects[0].height + metrics.Descent, AscentPx = metrics.Ascent, DescentPx = -metrics.Descent,
                     });
                     continue;
@@ -431,7 +438,7 @@ namespace TimboJimbo.UINext.Text
                     var lineRect = _rects[f];
                     results.Add(new InlinePlacementRequest
                     {
-                        TokenIndex = i, Prefab = req.Prefab, BelowGlyphs = true, Px = lineRect, Index = f - first, Count = fragmentCount,
+                        TokenIndex = i, Handler = handler, Prefab = req.Prefab, BelowGlyphs = true, Px = lineRect, Index = f - first, Count = fragmentCount,
                         BaselinePx = lineRect.height + metrics.Descent, AscentPx = metrics.Ascent, DescentPx = -metrics.Descent,
                     });
                 }

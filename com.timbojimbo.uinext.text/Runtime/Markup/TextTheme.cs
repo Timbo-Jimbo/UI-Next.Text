@@ -37,13 +37,16 @@ namespace TimboJimbo.UINext.Text.Markup
 
         private static TextTheme s_default;
 
-        /// <summary>The handler responsible for a token kind: the theme's own, or none.</summary>
+        /// <summary>
+        /// The handler responsible for a token kind: the theme's own first, then, for `code` spans and fenced code blocks,
+        /// the built-in backgrounds (<see cref="InlineBackground.BuiltIn"/>).
+        /// </summary>
         public InlineHandler FindHandler(string kind)
         {
             for (int i = 0; i < _handlers.Count; i++)
                 if (_handlers[i] != null && _handlers[i].Kind == kind)
                     return _handlers[i];
-            return null;
+            return InlineBackground.BuiltIn(kind);
         }
 
         /// <summary>The built-in defaults, used when neither the text nor the project settings assign a theme.</summary>
