@@ -8,8 +8,17 @@ namespace TimboJimbo.UINext.Text.Bridge
     /// <summary>Sprite assets the generator can lay out inline: emote sheets, and the blank placeholder used to reserve room for inline objects.</summary>
     public static class AtgSpriteAssets
     {
-        /// <summary>Code point of the single sprite in the placeholder asset. Put it in the text where an inline object goes.</summary>
+        /// <summary>Code point of the first sprite in the placeholder asset. Put it in the text where an inline object goes.</summary>
         public const char PlaceholderCodePoint = '';
+
+        /// <summary>
+        /// How many placeholders the asset has, from <see cref="PlaceholderCodePoint"/> on: as many objects in one text get
+        /// a code each, so the quad a layout draws for one says which it is (a sprite quad reports its character code).
+        /// </summary>
+        public const int PlaceholderCount = 256;
+
+        /// <summary>The placeholder for the object at <paramref name="index"/> in its text, the codes repeating past <see cref="PlaceholderCount"/>.</summary>
+        public static char PlaceholderCode(int index) => (char)(PlaceholderCodePoint + index % PlaceholderCount);
 
         private static SpriteAsset s_placeholder;
         private static Texture2D s_solid;
@@ -35,8 +44,8 @@ namespace TimboJimbo.UINext.Text.Bridge
         public static bool IsPlaceholder(in AtgQuadGroup group) => group.IsSprite && s_placeholder != null && group.Atlas == s_placeholder.spriteSheet;
 
         /// <summary>
-        /// A one-sprite asset whose sprite is a blank 4x4 texture. A span over the placeholder code point with
-        /// this asset and explicit metrics reserves exactly that box in the layout; the quad it emits tells you
+        /// An asset of <see cref="PlaceholderCount"/> sprites, each a blank 4x4 texture. A span over a placeholder code
+        /// point with this asset and explicit metrics reserves exactly that box in the layout; the quad it emits tells you
         /// where the box landed and can be skipped when drawing. The engine treats a sprite as a word of its own
         /// for line breaking, so this is for objects, not for spacing.
         /// </summary>
@@ -54,13 +63,20 @@ namespace TimboJimbo.UINext.Text.Bridge
                 texture.SetPixels32(pixels);
                 texture.Apply(false, true);
 
-                var glyph = new SpriteGlyph(0, new GlyphMetrics(4, 4, 0, 4, 4), new GlyphRect(0, 0, 4, 4), 1f, 0);
                 var asset = ScriptableObject.CreateInstance<SpriteAsset>();
                 asset.name = "UI.Text placeholder";
                 asset.hideFlags = HideFlags.HideAndDontSave;
                 asset.spriteSheet = texture;
-                asset.spriteGlyphTable = new List<SpriteGlyph> { glyph };
-                asset.spriteCharacterTable = new List<SpriteCharacter> { new SpriteCharacter(PlaceholderCodePoint, asset, glyph) { name = "placeholder" } };
+                var glyphs = new List<SpriteGlyph>(PlaceholderCount);
+                var characters = new List<SpriteCharacter>(PlaceholderCount);
+                for (int i = 0; i < PlaceholderCount; i++)
+                {
+                    var glyph = new SpriteGlyph((uint)i, new GlyphMetrics(4, 4, 0, 4, 4), new GlyphRect(0, 0, 4, 4), 1f, 0);
+                    glyphs.Add(glyph);
+                    characters.Add(new SpriteCharacter(PlaceholderCodePoint + (uint)i, asset, glyph) { name = "placeholder " + i });
+                }
+                asset.spriteGlyphTable = glyphs;
+                asset.spriteCharacterTable = characters;
                 asset.UpdateLookupTables();
                 s_placeholder = asset;
                 return asset;

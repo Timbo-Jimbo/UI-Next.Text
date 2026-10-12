@@ -5,8 +5,8 @@ using UnityEngine;
 
 namespace TimboJimbo.UINext.Text
 {
-    // The questions a layout answers about itself once it is made: the rectangles a range covers, links under a point,
-    // and carets, lines and the positions nearest a point, in source indices and layout pixels.
+    // The questions a layout answers about itself once it is made: the rectangles a range covers, the tappable span under
+    // a point, and carets, lines and the positions nearest a point, in source indices and layout pixels.
     public sealed partial class TextLayout
     {
         // What the caret and hit-test queries find of the last layout, as they first need it: each line's extent, and
@@ -99,13 +99,16 @@ namespace TimboJimbo.UINext.Text
             }
         }
 
-        /// <summary>The index into <see cref="TextDocument.Links"/> of the link under a layout point, or -1.</summary>
-        public int LinkAt(Vector2 pointPx)
+        /// <summary>
+        /// The tappable span (<see cref="TextRule.Tappable"/>) under a point in layout pixels, the innermost where they nest:
+        /// its index into <see cref="TextDocument.Matches"/>, or -1.
+        /// </summary>
+        public int MatchAt(Vector2 pointPx)
         {
             if (!_handle.IsLaidOut)
                 return -1;
-            int link = _handle.LinkAt(pointPx);
-            return link >= 0 && link < _document.Links.Count ? link : -1;
+            int match = _handle.LinkAt(pointPx);
+            return match >= 0 && match < Document.Matches.Count ? match : -1;
         }
 
         // ---- Carets and lines ----

@@ -15,8 +15,8 @@ namespace TimboJimbo.UINext.Text
 
         [Tooltip("The Font Stack used by texts that don't set their own. Empty means the OS default font.")]
         [SerializeField] private FontStack _defaultFont;
-        [Tooltip("The Text Theme used by texts that don't set their own. Empty means the built-in defaults.")]
-        [SerializeField] private Markup.TextTheme _defaultTheme;
+        [Tooltip("The Markup texts that don't set their own are read with. Empty means UI Next's built-in Markdown.")]
+        [SerializeField] private TextRuleSet _defaultMarkup;
 
         private static TextSettings s_instance;
 
@@ -34,11 +34,13 @@ namespace TimboJimbo.UINext.Text
         }
 
         public FontStack DefaultFont => _defaultFont;
-        public Markup.TextTheme DefaultTheme => _defaultTheme;
+
+        /// <summary>The rules texts that set none of their own are read with, or null for what draws them to choose.</summary>
+        public TextRuleSet DefaultMarkup => _defaultMarkup;
 
         /// <summary>
         /// Raised when something texts are laid out with changes: the active settings or what they hold, a font stack, a
-        /// theme. Whatever draws text (UI Next's Label) lays it out again.
+        /// markup or a rule. Whatever draws text (UI Next's Label) reads and lays it out again.
         /// </summary>
         public static event System.Action Changed;
 

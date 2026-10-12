@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Changed
+
+- Markup is read by rules: a `TextRule` has a trigger, the characters around the text it takes (wrapped, prefix, line, merging a run of lines, fenced, link, or a pattern), and a role, how what it takes is shown (a span, an element or a block); a `TextRuleSet` holds them in order, and at each place the first that matches, and accepts what it found, takes it. Spans nest, and a literal rule keeps what it wraps from the rest. Markdown is no longer built in: UI Next's built-in Markdown is a set of rules like any other.
+- `TextDocument` holds what the rules matched (`TextMatch`: the source range, the text, the argument, the span it is in), read by `TextDocument.Parse`. `TextLayoutInput.Markup` (null for plain text) replaces `RichText` and `Theme`, `TextLayoutInput.Document` lays out a text read already, and `TextLayoutInput.ObjectSizes` sizes elements and blocks.
+- Elements and blocks take exactly the room what draws the text gives them: an element stands in its line, on the baseline or centred on the text, and a block has a line of its own, as tall as it is. `TextLayout.TryGetObjectRect` says where each went, `GetMatchRects` gives a span's pieces of its lines, and `MatchAt` the tappable span under a point, in place of `LinkAt`.
+- A colour a span gives its text is its own: `TextLayout.TextColor` marks the text's own colour, which is what a tint colours.
+- `TextSettings.DefaultMarkup` replaces `DefaultTheme`; `Generate`, `Measure` and `LongestWord` take no `InlineContext`.
+- `TextTrigger` fields show in the inspector only where their kind uses them.
+
+### Removed
+
+- `MarkdownParser`, `TextTheme`, `InlineHandler`, `PrefabInlineHandler`, `InlineBackground` and what went with them (`InlineToken`, `TextLink`, `TextRun`, `RunStyle`, `BlockKind`, `InlinePlacement`, `InlinePlacementRequest`, `CollectPlacements`, `PlaceholderBoxes`, `EffectiveTheme`), and the `TimboJimbo.UINext.Text.Markup` namespace, whose types are in `TimboJimbo.UINext.Text`. Quotes and list items are no longer indents and bullets put into the text: UI Next shows them as blocks.
+
 ## [0.1.1] - 12/10/2026
 
 ### Fixed

@@ -1,21 +1,34 @@
 using System;
 using System.Collections.Generic;
 using TimboJimbo.UINext.Text.Bridge;
-using TimboJimbo.UINext.Text.Markup;
 using UnityEngine;
 using UnityEngine.TextCore.Text;
 
 namespace TimboJimbo.UINext.Text
 {
-    /// <summary>Everything a layout needs. Lengths are layout pixels: the unit the text is laid out in, canvas units for a TextBlock.</summary>
+    /// <summary>Everything a layout needs. Lengths are layout pixels: the unit the text is laid out in, points for a Label.</summary>
     public struct TextLayoutInput
     {
         public string Text;
-        public bool RichText;
+
+        /// <summary>The rules the text is read with (see <see cref="TextRule"/>); null for plain text.</summary>
+        public TextRuleSet Markup;
+
+        /// <summary>
+        /// <see cref="Text"/> already read (<see cref="TextDocument.Parse"/>), to lay out instead of reading it again with
+        /// <see cref="Markup"/>; null to read it. It must be the same text.
+        /// </summary>
+        public TextDocument Document;
+
+        /// <summary>
+        /// The size of each element and block, by match index into the document (any other entry is not read): what draws
+        /// the text shows each as something of that size. An element missing here is a square as big as the text, and a
+        /// block nothing.
+        /// </summary>
+        public IReadOnlyList<Vector2> ObjectSizes;
+
         /// <summary>The stack to draw with; null uses the project default, then the OS default font.</summary>
         public FontStack Font;
-        /// <summary>How markup renders; null uses the built-in theme.</summary>
-        public TextTheme Theme;
         public float FontSizePx;
         /// <summary>The box to lay out in. A negative width or height is unconstrained.</summary>
         public float WidthPx;
@@ -43,7 +56,6 @@ namespace TimboJimbo.UINext.Text
         public static TextLayoutInput Default => new()
         {
             Text = "",
-            RichText = true,
             FontSizePx = 24f,
             WidthPx = -1f,
             HeightPx = -1f,
@@ -53,53 +65,37 @@ namespace TimboJimbo.UINext.Text
         };
     }
 
-    /// <summary>
-    /// What to put over or behind part of the laid-out text: a prefab, or a background the renderer draws itself (an
-    /// <see cref="InlineBackground"/> handler, with no prefab). The rectangle and metrics are layout pixels, y down from
-    /// the layout's top-left corner.
-    /// </summary>
-    public struct InlinePlacementRequest
-    {
-        public int TokenIndex;
-        /// <summary>The handler that asked for it.</summary>
-        public InlineHandler Handler;
-        /// <summary>What to place, or null for a background the renderer draws (<see cref="Handler"/> is an InlineBackground).</summary>
-        public GameObject Prefab;
-        /// <summary>True for backgrounds, drawn under the glyphs; false for objects, drawn over them.</summary>
-        public bool BelowGlyphs;
-        public Rect Px;
-        /// <summary>This fragment's index and the total for its token.</summary>
-        public int Index;
-        public int Count;
-        /// <summary>Baseline distance from the rectangle's top, then the text's ascent and descent.</summary>
-        public float BaselinePx;
-        public float AscentPx;
-        public float DescentPx;
-    }
-
     /// <summary>A solid rectangle drawn under the glyphs: an underline or strikethrough segment. Layout pixels, y down.</summary>
     public struct DecorationQuad
     {
         public Rect Px;
+        /// <summary>A span's own colour, or <see cref="TextLayout.TextColor"/> for the text's.</summary>
         public Color32 Color;
     }
 
     /// <summary>
-    /// Lays out one text with the generator and answers questions about the result. Owns the parsed document,
-    /// the layout text, the generator handle and the plans for decorations and inline prefabs, and knows nothing
-    /// about GameObjects or meshes. What draws the text (UI Next's Label) feeds it a rect and draws the result.
+    /// Lays out one text with the generator and answers questions about the result. Owns the document it reads, the
+    /// layout text, the generator handle and the decorations, and knows nothing about GameObjects or meshes. What draws
+    /// the text (UI Next's Label) feeds it a rect and the sizes of the elements and blocks it shows, and draws the result.
     /// </summary>
     public sealed partial class TextLayout : IDisposable
     {
+        /// <summary>
+        /// The colour of glyphs and decorations in the text's own colour, which whatever draws the text colours as it
+        /// likes (tints) without laying it out again; any other is a span's own (<see cref="TextStyle.Color"/>), kept.
+        /// </summary>
+        public static readonly Color32 TextColor = new(255, 255, 255, 255);
+
         private readonly AtgTextHandle _handle = new();
         private readonly TextDocument _document = new();
         private readonly LayoutText _layoutText = new();
         private readonly SpanBuffer _spans = new();
         private readonly List<DecorationRun> _decorationRuns = new();
-        private readonly List<InlineObjectRequest> _atomicRequests = new();
-        private readonly List<Rect> _placeholderBoxes = new();
         private readonly List<DecorationQuad> _decorations = new();
+        private readonly List<(int Code, Rect Box)> _objectQuads = new();
+        private readonly List<Vector2> _objectSizes = new();
         private readonly List<Rect> _rects = new();
+        private TextDocument _laidOutDocument;
         private FontAsset _baseFont;
         private float _fontSizePx;
         private float _widthPx;
@@ -111,11 +107,12 @@ namespace TimboJimbo.UINext.Text
         private bool _generated;
 
         private static readonly List<TextLayout> s_measureScopes = new();
+        private static readonly List<TextRule> s_rules = new();
         private static int s_measureDepth;
         private static AtgTextHandle s_overflowHandle;
 
-        /// <summary>The parsed source: lines, runs, links and tokens in source indices.</summary>
-        public TextDocument Document => _document;
+        /// <summary>The text as read: what its rules matched, in source indices.</summary>
+        public TextDocument Document => _laidOutDocument ?? _document;
 
         /// <summary>The text the generator laid out, with its mapping to the source.</summary>
         public LayoutText LayoutText => _layoutText;
@@ -130,7 +127,7 @@ namespace TimboJimbo.UINext.Text
 
         /// <summary>
         /// How far below the top of the box it was given the layout's own box starts, in layout pixels; everything it
-        /// gives in layout pixels (its quads, decorations, placements and query answers) is measured from there. 0 unless
+        /// gives in layout pixels (its quads, decorations, rects and query answers) is measured from there. 0 unless
         /// <see cref="TextLayoutInput.MaxLines"/> made its box shorter than the one given, which it then sits in as its
         /// alignment says: in the middle, or at the bottom.
         /// </summary>
@@ -164,26 +161,22 @@ namespace TimboJimbo.UINext.Text
         /// </summary>
         public TextAnchor Alignment => _alignment;
 
-        /// <summary>Underline and strikethrough segments, in the run's colour before tinting.</summary>
+        /// <summary>Underline and strikethrough segments, in their span's colour or <see cref="TextColor"/>.</summary>
         public IReadOnlyList<DecorationQuad> Decorations => _decorations;
 
-        /// <summary>Bounds of each atomic placeholder, in text order.</summary>
-        public IReadOnlyList<Rect> PlaceholderBoxes => _placeholderBoxes;
-
         /// <summary>Lays the text out. False when there was nothing to draw.</summary>
-        public bool Generate(in TextLayoutInput input, in InlineContext context)
+        public bool Generate(in TextLayoutInput input)
         {
             _generated = false;
             _topPx = 0f;
             ClearQueries();
             _decorations.Clear();
-            _placeholderBoxes.Clear();
             _decorationRuns.Clear();
-            _atomicRequests.Clear();
+            _objectQuads.Clear();
+            _objectSizes.Clear();
 
             AtgEngine.Initialize();
-            var theme = EffectiveTheme(input.Theme);
-            var settings = Settings(in input, theme, in context, _decorationRuns, _atomicRequests);
+            var settings = Settings(in input, _decorationRuns);
             if (string.IsNullOrEmpty(settings.Text))
             {
                 // Nothing to lay out: the handle lets go of the last text, so neither its size nor its queries answer for it.
@@ -199,7 +192,7 @@ namespace TimboJimbo.UINext.Text
                     End = settings.Text.Length,
                     Underline = input.Underline,
                     Strikethrough = input.Strikethrough,
-                    Color = new Color32(255, 255, 255, 255),
+                    Color = TextColor,
                     Font = _baseFont,
                     FontSizePx = input.FontSizePx,
                 });
@@ -209,17 +202,22 @@ namespace TimboJimbo.UINext.Text
             // Room around every glyph for anti-aliasing, capped at what the atlas can represent.
             settings.VertexPaddingPx = _baseFont != null ? Mathf.Min(input.AntiAliasMarginPx, AtgFontAssets.MaxPaddingPx(_baseFont, input.FontSizePx)) : input.AntiAliasMarginPx;
 
+            // The sizes its objects were laid out at, kept for where they go.
+            if (input.ObjectSizes != null && _layoutText.ObjectCount > 0)
+                for (int i = 0; i < input.ObjectSizes.Count; i++)
+                    _objectSizes.Add(input.ObjectSizes[i]);
+
             _generated = _handle.Generate(ref settings);
             if (!_generated)
                 return false;
 
-            CollectPlaceholderBoxes();
-            CollectDecorations(theme.LineThicknessEm);
+            CollectObjectQuads();
+            CollectDecorations();
             return true;
         }
 
-        /// <summary>Builds the generator settings and, for rich text, the document, layout text and spans.</summary>
-        private AtgTextSettings Settings(in TextLayoutInput input, TextTheme theme, in InlineContext context, List<DecorationRun> decorations, List<InlineObjectRequest> atomicRequests)
+        /// <summary>Builds the generator settings and, for a text with rules, the document, layout text and spans.</summary>
+        private AtgTextSettings Settings(in TextLayoutInput input, List<DecorationRun> decorations)
         {
             var settings = AtgTextSettings.Default;
             var stack = EffectiveStack(input.Font);
@@ -237,24 +235,32 @@ namespace TimboJimbo.UINext.Text
             settings.WordWrap = input.WordWrap;
             settings.VerticalAlignment = ((int)input.Alignment / 3) switch { 0 => AtgVerticalAlignment.Top, 1 => AtgVerticalAlignment.Middle, _ => AtgVerticalAlignment.Bottom };
             // Colour is applied when the mesh is built, so a tint change never re-shapes the text.
-            settings.Color = new Color32(255, 255, 255, 255);
+            settings.Color = TextColor;
             settings.Weight = input.Bold ? AtgWeight.Bold : AtgWeight.Regular;
             settings.Style = input.Italic ? AtgStyle.Italic : AtgStyle.None;
             settings.CharacterSpacingPx = input.CharacterSpacingPx;
             settings.WordSpacingPx = input.WordSpacingPx;
             settings.ParagraphSpacingPx = input.ParagraphSpacingPx;
 
-            if (input.RichText)
+            _laidOutDocument = input.Document;
+            if (_laidOutDocument == null && input.Markup != null)
             {
-                MarkdownParser.Parse(input.Text, _document, theme.Handlers);
-                _layoutText.Build(_document, theme);
-                SpanBuilder.Build(_document, _layoutText, theme, _baseFont, input.FontSizePx, input.Bold, decorations, in context, atomicRequests, _spans);
+                s_rules.Clear();
+                input.Markup.GetRules(s_rules);
+                _document.Parse(input.Text, s_rules);
+                s_rules.Clear();
+                _laidOutDocument = _document;
+            }
+            if (_laidOutDocument != null)
+            {
+                _layoutText.Build(_laidOutDocument);
+                SpanBuilder.Build(_laidOutDocument, _layoutText, _baseFont, input.FontSizePx, input.Bold, input.ObjectSizes, decorations, _spans);
                 settings.Spans = _spans.Items;
                 settings.SpanCount = _spans.Count;
             }
             else
             {
-                _document.Reset(input.Text);
+                _document.SetPlain(input.Text);
                 _layoutText.BuildPlain(input.Text);
             }
             settings.Text = _layoutText.Text;
@@ -311,8 +317,11 @@ namespace TimboJimbo.UINext.Text
             settings.HeightPx = height;
         }
 
-        private void CollectPlaceholderBoxes()
+        // Where the placeholders were drawn, by their codes.
+        private void CollectObjectQuads()
         {
+            if (_layoutText.ObjectCount == 0)
+                return;
             for (int g = 0; g < _handle.GroupCount; g++)
             {
                 var group = _handle.GetGroup(g);
@@ -321,12 +330,12 @@ namespace TimboJimbo.UINext.Text
                 for (int q = 0; q < group.Count; q++)
                 {
                     _handle.GetQuad(g, q, out var quad);
-                    _placeholderBoxes.Add(quad.Bounds);
+                    _objectQuads.Add((quad.GlyphId, quad.Bounds));
                 }
             }
         }
 
-        private void CollectDecorations(float thicknessEm)
+        private void CollectDecorations()
         {
             for (int d = 0; d < _decorationRuns.Count; d++)
             {
@@ -342,13 +351,13 @@ namespace TimboJimbo.UINext.Text
                     float baseline = lineRect.yMax + metrics.Descent;
                     if (run.Underline)
                     {
-                        float thickness = thicknessEm > 0f ? thicknessEm * run.FontSizePx : metrics.UnderlineThickness;
+                        float thickness = metrics.UnderlineThickness;
                         float center = baseline - metrics.UnderlineOffset;
                         _decorations.Add(new DecorationQuad { Px = new Rect(lineRect.xMin, center - thickness * 0.5f, lineRect.width, thickness), Color = run.Color });
                     }
                     if (run.Strikethrough)
                     {
-                        float thickness = thicknessEm > 0f ? thicknessEm * run.FontSizePx : metrics.StrikethroughThickness;
+                        float thickness = metrics.StrikethroughThickness;
                         float center = baseline - metrics.StrikethroughOffset;
                         _decorations.Add(new DecorationQuad { Px = new Rect(lineRect.xMin, center - thickness * 0.5f, lineRect.width, thickness), Color = run.Color });
                     }
@@ -356,121 +365,99 @@ namespace TimboJimbo.UINext.Text
             }
         }
 
+        // ── Matches ──────────────────────────────────────────────────────────────
+
         /// <summary>
-        /// What the current layout wants placed, from the theme's handlers: their prefabs, and the backgrounds of
-        /// <see cref="InlineBackground"/> handlers.
+        /// Where an element or block match went in the last layout, as big as it was laid out at
+        /// (<see cref="TextLayoutInput.ObjectSizes"/>): an element standing in its line, hanging below the baseline by as
+        /// much of it as its alignment leaves there, a block on a line of its own. In layout pixels. False for a match that
+        /// is neither, or one the text was cut short before.
         /// </summary>
-        public void CollectPlacements(in InlineContext context, List<InlinePlacementRequest> results)
+        public bool TryGetObjectRect(int match, out Rect rect)
         {
-            results.Clear();
-            if (!_generated || _document.Tokens.Count == 0)
-                return;
-
-            var metrics = _baseFont != null ? AtgFontAssets.MetricsPx(_baseFont, _fontSizePx) : default;
-            float layoutWidth = _widthPx >= 0f ? _widthPx : _handle.SizePx.x;
-            int ordinal = 0;
-
-            for (int i = 0; i < _document.Tokens.Count; i++)
+            rect = default;
+            int index = _layoutText.ObjectIndex(match);
+            if (!_generated || index < 0) return false;
+            int code = AtgSpriteAssets.PlaceholderCode(index);
+            int found = -1, candidates = 0;
+            for (int q = 0; q < _objectQuads.Count; q++)
             {
-                var token = _document.Tokens[i];
-                var placed = _layoutText.Tokens[i];
-                var handler = placed.Handler;
-                if (handler == null || !placed.IsPlaced)
-                    continue;
-
-                if (placed.Placement == InlinePlacement.Atomic)
+                if (_objectQuads[q].Code != code) continue;
+                if (candidates++ == 0) found = q;
+            }
+            if (found < 0) return false;
+            if (candidates > 1 && _layoutText.TryGetRange(match, out int start, out _))
+            {
+                // The codes repeat past the placeholders there are: the quad nearest where its character stands.
+                _handle.GetRangeRects(start, start + 1, _rects);
+                if (_rects.Count > 0)
                 {
-                    var request = i < _atomicRequests.Count ? _atomicRequests[i] : default;
-                    int k = ordinal++;
-                    if (request.Prefab == null || k >= _placeholderBoxes.Count)
-                        continue;
-                    // The layout reserved the part of the box above the baseline; the prefab gets the whole box.
-                    var box = _placeholderBoxes[k];
-                    float above = box.height;
-                    var size = request.SizeEm.x > 0f && request.SizeEm.y > 0f ? request.SizeEm : Vector2.one;
-                    box.height = Mathf.Max(above, size.y * _fontSizePx);
-                    results.Add(new InlinePlacementRequest
+                    var at = _rects[0].center;
+                    float nearest = float.PositiveInfinity;
+                    for (int q = 0; q < _objectQuads.Count; q++)
                     {
-                        TokenIndex = i, Handler = handler, Prefab = request.Prefab, BelowGlyphs = false, Px = box, Index = 0, Count = 1,
-                        BaselinePx = above, AscentPx = above, DescentPx = box.height - above,
-                    });
-                    continue;
-                }
-
-                var req = handler.Request(in token, in context);
-                if (req.Prefab == null && handler is not InlineBackground)
-                    continue;
-                _handle.GetRangeRects(placed.Start, placed.End, _rects);
-                int count = _rects.Count;
-                if (count == 0)
-                    continue;
-
-                if (placed.Placement == InlinePlacement.Block)
-                {
-                    // One box across the full width, from the first line's top to the last line's bottom.
-                    float yMin = float.MaxValue, yMax = float.MinValue;
-                    for (int f = 0; f < count; f++)
-                    {
-                        yMin = Mathf.Min(yMin, _rects[f].yMin);
-                        yMax = Mathf.Max(yMax, _rects[f].yMax);
+                        if (_objectQuads[q].Code != code) continue;
+                        float distance = (_objectQuads[q].Box.center - at).sqrMagnitude;
+                        if (distance >= nearest) continue;
+                        nearest = distance;
+                        found = q;
                     }
-                    results.Add(new InlinePlacementRequest
-                    {
-                        TokenIndex = i, Handler = handler, Prefab = req.Prefab, BelowGlyphs = true, Px = new Rect(0f, yMin, layoutWidth, yMax - yMin), Index = 0, Count = 1,
-                        BaselinePx = _rects[0].height + metrics.Descent, AscentPx = metrics.Ascent, DescentPx = -metrics.Descent,
-                    });
-                    continue;
-                }
-
-                // A token longer than a whole line leaves its pads alone on a line of their own; those fragments
-                // hold no text and get no prefab.
-                int first = 0, last = count - 1;
-                if (placed.PaddingEm > 0f && placed.Length > 2 * LayoutText.PadCount)
-                {
-                    if (_handle.LineOf(placed.Start) != _handle.LineOf(placed.Start + LayoutText.PadCount))
-                        first++;
-                    if (_handle.LineOf(placed.End - 1) != _handle.LineOf(placed.End - LayoutText.PadCount - 1))
-                        last--;
-                }
-                int fragmentCount = last - first + 1;
-                for (int f = first; f <= last; f++)
-                {
-                    var lineRect = _rects[f];
-                    results.Add(new InlinePlacementRequest
-                    {
-                        TokenIndex = i, Handler = handler, Prefab = req.Prefab, BelowGlyphs = true, Px = lineRect, Index = f - first, Count = fragmentCount,
-                        BaselinePx = lineRect.height + metrics.Descent, AscentPx = metrics.Ascent, DescentPx = -metrics.Descent,
-                    });
                 }
             }
+            var box = _objectQuads[found].Box;
+            var size = match < _objectSizes.Count ? _objectSizes[match] : box.size;
+            rect = new Rect(box.x, box.y, size.x, Mathf.Max(size.y, box.height));
+            return true;
         }
 
         /// <summary>
-        /// The size a text would take, in layout pixels, without a component: for virtualised lists that need row
-        /// heights ahead of time. A negative width is unconstrained. Re-entrant, since a handler may measure its own label.
+        /// The rects a span match's text covers in the last layout, its padding included, in layout pixels: one per line
+        /// it is on, and in a line that reads both ways one per stretch reading one way. Padding left alone on a line by a
+        /// span longer than a line has none. Empty for a match that shows nothing.
         /// </summary>
-        public static Vector2 Measure(string text, FontStack font, float fontSizePx, float widthPx, bool wordWrap = true, bool bold = false, bool italic = false, bool richText = false, TextTheme theme = null)
+        public void GetMatchRects(int match, List<Rect> results)
+        {
+            results.Clear();
+            if (!_handle.IsLaidOut || !_layoutText.TryGetRange(match, out int start, out int end))
+                return;
+            _handle.GetRangeRects(start, end, results);
+            var matches = Document.Matches;
+            var rule = match < matches.Count ? matches[match].Rule : null;
+            if (rule == null || rule.PaddingEm <= 0f || end - start <= 2 * LayoutText.PadCount || results.Count < 2)
+                return;
+            if (_handle.LineOf(end - 1) != _handle.LineOf(end - LayoutText.PadCount - 1))
+                results.RemoveAt(results.Count - 1);
+            if (results.Count > 1 && _handle.LineOf(start) != _handle.LineOf(start + LayoutText.PadCount))
+                results.RemoveAt(0);
+        }
+
+        // ── Measuring ────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// The size a text would take, in layout pixels, without a component: for virtualised lists that need row
+        /// heights ahead of time. A negative width is unconstrained. Re-entrant.
+        /// </summary>
+        public static Vector2 Measure(string text, FontStack font, float fontSizePx, float widthPx, bool wordWrap = true, bool bold = false,
+            bool italic = false, TextRuleSet markup = null)
         {
             var input = TextLayoutInput.Default;
             input.Text = text;
-            input.RichText = richText;
+            input.Markup = markup;
             input.Font = font;
-            input.Theme = theme;
             input.FontSizePx = fontSizePx;
             input.WidthPx = widthPx;
             input.WordWrap = wordWrap;
             input.Bold = bold;
             input.Italic = italic;
-            return Measure(in input, new InlineContext(null, fontSizePx, Color.white));
+            return Measure(in input);
         }
 
         /// <summary>
         /// The size a text would take laid out from an input, in layout pixels: at its width (negative for unconstrained)
-        /// with its wrapping, spacing and markup, and no taller than <see cref="TextLayoutInput.MaxLines"/> lines of its
-        /// font; its height is not a constraint. Inline handlers size their objects for <paramref name="context"/>, as
-        /// they do when the text is laid out. Re-entrant, since a handler may measure its own label.
+        /// with its wrapping, spacing, markup and objects, and no taller than <see cref="TextLayoutInput.MaxLines"/> lines
+        /// of its font; its height is not a constraint. Re-entrant, so what is measured may measure text of its own.
         /// </summary>
-        public static Vector2 Measure(in TextLayoutInput input, in InlineContext context)
+        public static Vector2 Measure(in TextLayoutInput input)
         {
             if (string.IsNullOrEmpty(input.Text))
                 return Vector2.zero;
@@ -478,7 +465,7 @@ namespace TimboJimbo.UINext.Text
             try
             {
                 AtgEngine.Initialize();
-                var settings = scope.Settings(in input, EffectiveTheme(input.Theme), in context, null, null);
+                var settings = scope.Settings(in input, null);
                 var size = scope._handle.MeasurePx(ref settings);
                 // As many lines as a layout keeps (see ApplyOverflow).
                 if (input.MaxLines > 0 && scope._baseFont != null)
@@ -494,10 +481,10 @@ namespace TimboJimbo.UINext.Text
         /// <summary>
         /// The widest stretch of a text between spaces, laid out from an input one line to a paragraph, in layout pixels:
         /// how narrow it can be wrapped before a word would run past its edge, as CSS's min-content width is but breaking
-        /// at spaces only. Taken from the text as laid out, so markup counts as it is drawn: a link by its label, a
-        /// heading at its size, a padded code span with its padding, an inline object by its box.
+        /// at spaces only. Taken from the text as laid out, so markup counts as it is drawn: a link by its text, a heading
+        /// at its size, a padded span with its padding, an element or block by its size.
         /// </summary>
-        public static float LongestWord(in TextLayoutInput input, in InlineContext context)
+        public static float LongestWord(in TextLayoutInput input)
         {
             if (string.IsNullOrEmpty(input.Text))
                 return 0f;
@@ -512,10 +499,10 @@ namespace TimboJimbo.UINext.Text
                 unwrapped.Overflow = TextOverflow.Overflow;
                 unwrapped.MaxLines = 0;
                 unwrapped.Underline = unwrapped.Strikethrough = false;
-                scope.Generate(in unwrapped, in context);
+                scope.Generate(in unwrapped);
                 if (!scope._handle.IsLaidOut)
                     return 0f;
-                // Words as the layout text has them: no-break spaces (layout padding) hold on to the word they pad.
+                // Words as the layout text has them: no-break spaces (padding) hold on to the word they pad.
                 string text = scope._layoutText.Text;
                 float widest = 0f;
                 int start = -1;
@@ -541,7 +528,7 @@ namespace TimboJimbo.UINext.Text
         }
 
         // Whether a line may break at a character of the layout text: a space, but not a no-break space (U+00A0, which
-        // layout padding is, U+2007 or U+202F).
+        // padding is, U+2007 or U+202F).
         private static bool BreaksAt(char c) => char.IsWhiteSpace(c) && c != (char)0x00A0 && c != (char)0x2007 && c != (char)0x202F;
 
         // The measure layout for the depth measuring has reached; leave it by taking s_measureDepth back down.
@@ -566,15 +553,6 @@ namespace TimboJimbo.UINext.Text
         };
 #endif
 
-        /// <summary>The theme a text lays out with: its own, else the project default, else the built-in one.</summary>
-        public static TextTheme EffectiveTheme(TextTheme theme)
-        {
-            if (theme != null)
-                return theme;
-            var settings = TextSettings.Instance;
-            return settings != null && settings.DefaultTheme != null ? settings.DefaultTheme : TextTheme.Default;
-        }
-
         /// <summary>The stack a text draws with: its own, else the project default, else the OS default.</summary>
         public static FontStack EffectiveStack(FontStack font)
         {
@@ -588,6 +566,7 @@ namespace TimboJimbo.UINext.Text
         {
             _handle.Dispose();
             _generated = false;
+            _laidOutDocument = null;
             ClearQueries();
         }
     }

@@ -1,99 +1,74 @@
 using System.Collections.Generic;
 using System.Text;
+using TimboJimbo.UINext.Text.Bridge;
 
-namespace TimboJimbo.UINext.Text.Markup
+namespace TimboJimbo.UINext.Text
 {
-    /// <summary>What a run of the layout text is: copied source, or something the layout inserted.</summary>
-    public enum LayoutRunKind
+    /// <summary>What a run of the layout text is.</summary>
+    internal enum LayoutRunKind : byte
     {
-        /// <summary>Source text shown as written.</summary>
+        /// <summary>Source text shown as written, in the style of the span it is in.</summary>
         Text,
-        /// <summary>The em space that indents quotes and list items.</summary>
-        Indent,
-        /// <summary>A list bullet or number, followed by a space.</summary>
-        Marker,
-        /// <summary>No-break spaces that reserve layout padding around a token's text.</summary>
+        /// <summary>No-break spaces keeping a padded span's room either side of its text.</summary>
         Pad,
-        /// <summary>The placeholder character an atomic token becomes.</summary>
-        Object,
+        /// <summary>The placeholder an element becomes, as big as what shows it.</summary>
+        Element,
+        /// <summary>The placeholder a block becomes, alone on its line, as big as what shows it.</summary>
+        Block,
+        /// <summary>The line break that ends a block's line.</summary>
+        BlockEnd,
     }
 
-    /// <summary>A range of the layout text with one uniform style. Indices are into <see cref="LayoutText.Text"/>.</summary>
-    public struct LayoutRun
+    /// <summary>A range of the layout text with one kind and one match: the innermost span its text is in, or its object.</summary>
+    internal struct LayoutRun
     {
         public int Start;
         public int Length;
         public LayoutRunKind Kind;
-        public RunStyle Style;
-        public BlockKind Block;
-        /// <summary>Index into <see cref="TextDocument.Links"/>, or -1.</summary>
-        public int LinkIndex;
-        /// <summary>Index into <see cref="TextDocument.Tokens"/>, or -1.</summary>
-        public int TokenIndex;
+        public int Match;
 
         public int End => Start + Length;
-    }
-
-    /// <summary>Where a document token landed in the layout text. Index-aligned with <see cref="TextDocument.Tokens"/>.</summary>
-    public struct LayoutToken
-    {
-        /// <summary>Range in the layout text: the text plus its pads, or the one placeholder character. Start is -1 when the token produced nothing.</summary>
-        public int Start;
-        public int Length;
-        /// <summary>The handler that renders the token: the token's own, or the theme's for a built-in kind. May be null.</summary>
-        public InlineHandler Handler;
-        public InlinePlacement Placement;
-        /// <summary>Layout padding either side of the text, in em of the token's font size; 0 for none.</summary>
-        public float PaddingEm;
-
-        public int End => Start + Length;
-        public bool IsPlaced => Start >= 0;
     }
 
     /// <summary>
-    /// The text the generator lays out, built from a <see cref="TextDocument"/>: its shown runs copied, with
-    /// everything the layout adds inserted here and nowhere else. Newlines between lines, an em space to indent
-    /// quotes and list items, list markers, no-break spaces as layout padding around tokens that ask for it, and
-    /// one placeholder character per atomic token. Keeps the mapping between source and layout indices, so a
-    /// caret, a selection or a hit test can move between the two.
+    /// The text the generator lays out, built from a <see cref="TextDocument"/>: the source it shows, copied, with what
+    /// layout adds put in here and nowhere else: line breaks between lines, no-break spaces as a padded span's room
+    /// either side, and one placeholder character for each element and block, a block's alone on its line. Keeps the
+    /// mapping between source and layout indices, so a caret, a selection or a hit test can move between the two, and
+    /// where each match landed.
     /// </summary>
     public sealed class LayoutText
     {
         /// <summary>
-        /// Layout padding is a run of no-break spaces either side of the text, sized by the span builder. The
-        /// no-break space breaks exactly as padding should: a line may break after an ordinary space before it,
-        /// never between it and the text it pads.
+        /// A span's padding is a run of no-break spaces either side of its text, sized by the span builder. The no-break
+        /// space breaks as padding should: a line may break at an ordinary space before it, never between it and the text
+        /// it pads.
         /// </summary>
         public const char Pad = ' ';
-        /// <summary>No-break spaces per pad run; two let a run be sized up to twice a space of the token's font.</summary>
-        public const int PadCount = 2;
-        /// <summary>Quotes and list items indent with an em space; the generator applies a span indent per span rather than per line.</summary>
-        public const char Indent = ' ';
-        public const char Bullet = '•';
-        /// <summary>The character an atomic token becomes; a sprite span over it reserves the object's box.</summary>
-        public const char ObjectChar = Bridge.AtgSpriteAssets.PlaceholderCodePoint;
 
-        private const string BulletMarker = "• ";
+        /// <summary>No-break spaces per pad run; two let one be sized up to twice a space of the span's font.</summary>
+        public const int PadCount = 2;
+
         private static readonly string s_pads = new(Pad, PadCount);
 
         private struct Segment
         {
             public int LayoutStart;
             public int Length;
-            /// <summary>Source index of the first character, or -1 for inserted text.</summary>
+            // The source index of its first character, or -1 for text layout put in.
             public int SourceStart;
         }
 
         private readonly StringBuilder _text = new();
         private readonly List<Segment> _segments = new();
-        private readonly List<int> _tokenFirstRun = new();
-        private readonly List<int> _tokenLastRun = new();
+        private readonly List<int> _matchStart = new();
+        private readonly List<int> _matchEnd = new();
+        private readonly List<int> _objectIndex = new();
         private string _string = "";
         private bool _stringDirty;
         private int _sourceLength;
 
-        public readonly List<LayoutRun> Runs = new();
-        public readonly List<LayoutToken> Tokens = new();
+        internal readonly List<LayoutRun> Runs = new();
 
         /// <summary>The layout text, cached until the next build.</summary>
         public string Text
@@ -111,7 +86,10 @@ namespace TimboJimbo.UINext.Text.Markup
 
         public int Length => _text.Length;
 
-        /// <summary>The source shown as is: one copied segment and no runs. For texts with rich text off.</summary>
+        /// <summary>How many elements and blocks it holds.</summary>
+        public int ObjectCount { get; private set; }
+
+        /// <summary>The source as it is: one copied segment and no runs. For plain text.</summary>
         public void BuildPlain(string source)
         {
             Clear();
@@ -124,76 +102,78 @@ namespace TimboJimbo.UINext.Text.Markup
             _stringDirty = true;
         }
 
-        /// <summary>Builds the layout text for a parsed document. The theme resolves handlers for the built-in token kinds.</summary>
-        public void Build(TextDocument document, TextTheme theme)
+        /// <summary>Builds the layout text for a parsed document.</summary>
+        public void Build(TextDocument document)
         {
             Clear();
-            _sourceLength = document.Text.Length;
-
-            for (int t = 0; t < document.Tokens.Count; t++)
+            var source = document.Text;
+            var matches = document.Matches;
+            _sourceLength = source.Length;
+            for (int m = 0; m < matches.Count; m++)
             {
-                var token = document.Tokens[t];
-                var handler = token.Handler != null ? token.Handler : theme != null ? theme.FindHandler(token.Kind) : null;
-                var placement = handler != null ? handler.Placement : InlinePlacement.Fragments;
-                float padding = handler != null && placement != InlinePlacement.Atomic && handler.PaddingEm > 0f ? handler.PaddingEm : 0f;
-                Tokens.Add(new LayoutToken { Start = -1, Handler = handler, Placement = placement, PaddingEm = padding });
-                _tokenFirstRun.Add(-1);
-                _tokenLastRun.Add(-1);
-            }
-            for (int r = 0; r < document.Runs.Count; r++)
-            {
-                int t = document.Runs[r].TokenIndex;
-                if (t < 0) continue;
-                if (_tokenFirstRun[t] < 0) _tokenFirstRun[t] = r;
-                _tokenLastRun[t] = r;
+                _matchStart.Add(-1);
+                _matchEnd.Add(-1);
+                _objectIndex.Add(-1);
             }
 
-            for (int li = 0; li < document.Lines.Count; li++)
+            // A block whose line has not ended yet: the line break after it is its own, and anything else starts a new line.
+            int block = -1;
+            foreach (var piece in document.Pieces)
             {
-                if (li > 0)
-                    Insert("\n");
-                var line = document.Lines[li];
-
-                switch (line.Kind)
+                if (block >= 0 && piece.Kind != PieceKind.Break)
                 {
-                    case BlockKind.Quote:
-                        InsertRun(Indent.ToString(), LayoutRunKind.Indent, line.Kind, RunStyle.None, -1, -1);
+                    Add("\n", -1, LayoutRunKind.BlockEnd, block, matches, extend: false);
+                    block = -1;
+                }
+                switch (piece.Kind)
+                {
+                    case PieceKind.Text:
+                        Add(source, piece.Start, piece.Length, piece.Start, LayoutRunKind.Text, piece.Match, matches);
                         break;
-                    case BlockKind.ListItem:
-                        InsertRun(Indent.ToString(), LayoutRunKind.Indent, line.Kind, RunStyle.None, -1, -1);
-                        InsertRun(line.ListLabel != null ? line.ListLabel + " " : BulletMarker, LayoutRunKind.Marker, line.Kind, RunStyle.None, -1, -1);
+                    case PieceKind.PadStart:
+                    case PieceKind.PadEnd:
+                        Add(s_pads, -1, LayoutRunKind.Pad, piece.Match, matches);
                         break;
-                    case BlockKind.CodeBlock:
-                        // Every line of a block gets the padding, so a full-width background insets its text.
-                        if (line.RunCount > 0)
+                    case PieceKind.Break:
+                        if (block >= 0)
                         {
-                            var first = document.Runs[line.FirstRun];
-                            if (first.TokenIndex >= 0 && Tokens[first.TokenIndex].PaddingEm > 0f)
-                                InsertRun(s_pads, LayoutRunKind.Pad, line.Kind, first.Style, -1, first.TokenIndex);
+                            Add("\n", piece.Start, LayoutRunKind.BlockEnd, block, matches, extend: false);
+                            block = -1;
+                        }
+                        else
+                        {
+                            AddPlain("\n", piece.Start);
                         }
                         break;
-                }
-
-                for (int ri = 0; ri < line.RunCount; ri++)
-                {
-                    int runIndex = line.FirstRun + ri;
-                    var run = document.Runs[runIndex];
-                    int t = run.TokenIndex;
-                    if (t >= 0 && Tokens[t].Placement == InlinePlacement.Atomic)
-                    {
-                        InsertRun(ObjectChar.ToString(), LayoutRunKind.Object, line.Kind, run.Style, run.LinkIndex, t);
-                        continue;
-                    }
-                    bool padded = t >= 0 && Tokens[t].PaddingEm > 0f && line.Kind != BlockKind.CodeBlock;
-                    if (padded && _tokenFirstRun[t] == runIndex)
-                        InsertRun(s_pads, LayoutRunKind.Pad, line.Kind, run.Style, -1, t);
-                    Copy(document.Text, run.Start, run.Length, line.Kind, run.Style, run.LinkIndex, t);
-                    if (padded && _tokenLastRun[t] == runIndex)
-                        InsertRun(s_pads, LayoutRunKind.Pad, line.Kind, run.Style, -1, t);
+                    case PieceKind.Object:
+                        bool isBlock = matches[piece.Match].Role == TextRole.Block;
+                        // A block starts a line of its own.
+                        if (isBlock && _text.Length > 0 && _text[_text.Length - 1] != '\n')
+                            AddPlain("\n", -1);
+                        int index = ObjectCount++;
+                        _objectIndex[piece.Match] = index;
+                        Add(AtgSpriteAssets.PlaceholderCode(index).ToString(), -1, isBlock ? LayoutRunKind.Block : LayoutRunKind.Element, piece.Match, matches);
+                        if (isBlock)
+                            block = piece.Match;
+                        break;
                 }
             }
             _stringDirty = true;
         }
+
+        /// <summary>
+        /// Where a match landed in the layout text: [start, end), its text and padding (and what is inside it), or its
+        /// placeholder. False for a match that shows nothing.
+        /// </summary>
+        public bool TryGetRange(int match, out int start, out int end)
+        {
+            start = match >= 0 && match < _matchStart.Count ? _matchStart[match] : -1;
+            end = start >= 0 ? _matchEnd[match] : -1;
+            return start >= 0;
+        }
+
+        /// <summary>An element's or block's place among the objects (which placeholder it is), or -1 for another match.</summary>
+        public int ObjectIndex(int match) => match >= 0 && match < _objectIndex.Count ? _objectIndex[match] : -1;
 
         /// <summary>The layout index of a source index. Inside skipped markup it is the next shown character; past the end, the layout length.</summary>
         public int ToLayout(int sourceIndex)
@@ -250,48 +230,42 @@ namespace TimboJimbo.UINext.Text.Markup
         {
             _text.Clear();
             _segments.Clear();
-            _tokenFirstRun.Clear();
-            _tokenLastRun.Clear();
+            _matchStart.Clear();
+            _matchEnd.Clear();
+            _objectIndex.Clear();
             Runs.Clear();
-            Tokens.Clear();
+            ObjectCount = 0;
             _string = "";
             _stringDirty = false;
         }
 
-        private void Copy(string source, int start, int length, BlockKind block, RunStyle style, int linkIndex, int tokenIndex)
+        // Text with no run of its own (a line break), from a source index or put in (-1).
+        private void AddPlain(string text, int sourceStart) => AddPlain(text, 0, text.Length, sourceStart);
+
+        private void AddPlain(string text, int from, int length, int sourceStart)
         {
-            if (length <= 0)
-                return;
-            int layoutStart = _text.Length;
-            _text.Append(source, start, length);
-            _segments.Add(new Segment { LayoutStart = layoutStart, Length = length, SourceStart = start });
-            AddRun(layoutStart, length, LayoutRunKind.Text, block, style, linkIndex, tokenIndex);
+            _segments.Add(new Segment { LayoutStart = _text.Length, Length = length, SourceStart = sourceStart });
+            _text.Append(text, from, length);
         }
 
-        private void Insert(string text)
-        {
-            int layoutStart = _text.Length;
-            _text.Append(text);
-            _segments.Add(new Segment { LayoutStart = layoutStart, Length = text.Length, SourceStart = -1 });
-        }
+        private void Add(string text, int sourceStart, LayoutRunKind kind, int match, IReadOnlyList<TextMatch> matches, bool extend = true) =>
+            Add(text, 0, text.Length, sourceStart, kind, match, matches, extend);
 
-        private void InsertRun(string text, LayoutRunKind kind, BlockKind block, RunStyle style, int linkIndex, int tokenIndex)
+        // Text with a run: [from, from + length) of `text`, copied from a source index or put in (-1). The run's match, and
+        // every span it is inside, reach over it, unless it only ends a block's line.
+        private void Add(string text, int from, int length, int sourceStart, LayoutRunKind kind, int match, IReadOnlyList<TextMatch> matches,
+            bool extend = true)
         {
-            int layoutStart = _text.Length;
-            Insert(text);
-            AddRun(layoutStart, text.Length, kind, block, style, linkIndex, tokenIndex);
-        }
-
-        private void AddRun(int start, int length, LayoutRunKind kind, BlockKind block, RunStyle style, int linkIndex, int tokenIndex)
-        {
-            Runs.Add(new LayoutRun { Start = start, Length = length, Kind = kind, Block = block, Style = style, LinkIndex = linkIndex, TokenIndex = tokenIndex });
-            if (tokenIndex < 0)
-                return;
-            var token = Tokens[tokenIndex];
-            if (token.Start < 0)
-                token.Start = start;
-            token.Length = start + length - token.Start;
-            Tokens[tokenIndex] = token;
+            int start = _text.Length;
+            AddPlain(text, from, length, sourceStart);
+            Runs.Add(new LayoutRun { Start = start, Length = length, Kind = kind, Match = match });
+            if (!extend) return;
+            for (int m = match; m >= 0; m = matches[m].Parent)
+            {
+                if (_matchStart[m] < 0)
+                    _matchStart[m] = start;
+                _matchEnd[m] = _text.Length;
+            }
         }
     }
 }

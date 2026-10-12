@@ -51,7 +51,7 @@ namespace TimboJimboEditor.UINext.Text
             return new SettingsProvider("Project/Timbo Jimbo/UI Next Text", SettingsScope.Project)
             {
                 label = "UI Next Text",
-                keywords = new HashSet<string>(new[] { "Text", "Font", "Theme" }),
+                keywords = new HashSet<string>(new[] { "Text", "Font", "Markup", "Markdown" }),
                 deactivateHandler = () => serializedObject = null,
                 guiHandler = _ =>
                 {
@@ -70,7 +70,7 @@ namespace TimboJimboEditor.UINext.Text
 
                     if (active == null)
                     {
-                        EditorGUILayout.HelpBox("No settings asset. Texts use the OS default font and the built-in theme.", MessageType.Info);
+                        EditorGUILayout.HelpBox("No settings asset. Texts use the OS default font and the built-in Markdown.", MessageType.Info);
                         if (GUILayout.Button("Create", GUILayout.Width(120)))
                         {
                             var created = CreateAsset();
