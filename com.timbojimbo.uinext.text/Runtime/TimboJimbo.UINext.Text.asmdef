@@ -1,0 +1,16 @@
+{
+    "name": "TimboJimbo.UINext.Text",
+    "rootNamespace": "TimboJimbo.UINext.Text",
+    "references": [
+        "Unity.TextCore.FontEngine.Tools"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,14 @@
+{
+    "name": "Unity.TextCore.FontEngine.Tools",
+    "rootNamespace": "TimboJimbo.UINext.Text.Bridge",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

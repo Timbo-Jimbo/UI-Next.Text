@@ -1,0 +1,16 @@
+{
+	"name": "com.timbojimbo.uinext.text",
+	"displayName": "UI Next Text",
+	"version": "0.1.0",
+	"unity": "6000.5",
+	"description": "Text for UI Next, laid out by Unity's Advanced Text Generator: HarfBuzz shaping, ICU line breaking and bidi, OS font fallback and colour emoji; font stacks of OS families and project fonts; a Markdown dialect with inline handlers; and the caret, line and direction queries editing needs.",
+	"dependencies": {},
+	"author": {
+		"name": "Timbo Jimbo",
+		"url": "https://timbojimbo.com",
+		"email": "hello@timbojimbo.com"
+	},
+	"changelogUrl": "https://github.com/Timbo-Jimbo/UI-Next.Text/blob/main/com.timbojimbo.uinext.text/CHANGELOG.md",
+	"documentationUrl": "https://github.com/Timbo-Jimbo/UI-Next.Text#readme",
+	"licensesUrl": "https://github.com/Timbo-Jimbo/UI-Next.Text/blob/main/LICENSE"
+}
