@@ -187,6 +187,44 @@ namespace TimboJimbo.UINext.Text.Bridge
                 asset.UpdateBoldWeight();
         }
 
+        /// <summary>
+        /// Readies fonts ahead of their first text, for a loading screen: makes what the engine draws each with, and draws
+        /// each of <paramref name="characters"/> into the atlas of the first of <paramref name="fonts"/> that has it, and
+        /// into those of that font's bold and italic faces. Static font assets, which the generator does not draw with,
+        /// are passed over.
+        /// </summary>
+        public static void Prewarm(IReadOnlyList<FontAsset> fonts, string characters)
+        {
+            string left = characters;
+            for (int i = 0; i < fonts.Count && !string.IsNullOrEmpty(left); i++)
+            {
+                var font = fonts[i];
+                if (!IsDynamic(font))
+                    continue;
+                Prepare(font);
+                font.TryAddCharacters(left, out string missing);
+                var table = font.fontWeightTable;
+                if (table != null)
+                {
+                    foreach (var pair in table)
+                    {
+                        PrewarmFace(pair.regularTypeface, font, left);
+                        PrewarmFace(pair.italicTypeface, font, left);
+                    }
+                }
+                left = missing;
+            }
+            FlushUpdates();
+        }
+
+        private static void PrewarmFace(FontAsset face, FontAsset font, string characters)
+        {
+            if (face == null || face == font || !IsDynamic(face))
+                return;
+            Prepare(face);
+            face.TryAddCharacters(characters, out _);
+        }
+
         private static void MarkTransient(FontAsset asset)
         {
             asset.hideFlags = TransientFlags;

@@ -31,6 +31,10 @@ namespace TimboJimbo.UINext.Text
 
         private static FontStack s_default;
 
+        // What Prewarm draws when given nothing: the printable ASCII, space to tilde.
+        private static readonly string PrintableAscii = Ascii();
+        private static readonly List<FontAsset> s_prewarm = new();
+
         public List<FontSource> Sources => _sources;
 
         /// <summary>The fonts consulted first for emoji; call <see cref="Invalidate"/> after changing the list.</summary>
@@ -98,6 +102,43 @@ namespace TimboJimbo.UINext.Text
             _fallbacks?.Dispose();
             _fallbacks = null;
             _resolved = false;
+        }
+
+        /// <summary>
+        /// Readies the stack ahead of its first text, for a loading screen: resolves its fonts, their bold and italic faces
+        /// with them, and draws <paramref name="characters"/> (the printable ASCII when null) into their atlases, each into
+        /// the first of its fonts that has it, its sources in order and then its emoji fonts. Text drawn with the stack
+        /// otherwise does this as it goes, which can hold up the frame it first shows in. Characters none of its fonts has
+        /// are left to the OS fallback fonts, and after <see cref="Invalidate"/> the fonts are made again as they are used.
+        /// </summary>
+        public void Prewarm(string characters = null)
+        {
+            Resolve();
+            s_prewarm.Clear();
+            if (_primary != null)
+                s_prewarm.Add(_primary);
+            AddResolved(_sources);
+            AddResolved(_emoji);
+            AtgFontAssets.Prewarm(s_prewarm, characters ?? PrintableAscii);
+            s_prewarm.Clear();
+        }
+
+        private static void AddResolved(List<FontSource> sources)
+        {
+            foreach (var source in sources)
+            {
+                var asset = source?.Resolve();
+                if (asset != null && !s_prewarm.Contains(asset))
+                    s_prewarm.Add(asset);
+            }
+        }
+
+        private static string Ascii()
+        {
+            var chars = new char['~' - ' ' + 1];
+            for (int i = 0; i < chars.Length; i++)
+                chars[i] = (char)(' ' + i);
+            return new string(chars);
         }
 
         private void Resolve()

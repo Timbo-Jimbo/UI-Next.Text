@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- `FontStack.Prewarm` resolves a stack's fonts, their bold and italic faces with them, and draws characters into their atlases (the printable ASCII unless given others), for a loading screen: the first text drawn with a stack otherwise does this as it goes, which can hold up the frame it first shows in.
+
 ### Changed
 
 - Markup is read by rules: a `TextRule` has a trigger, the characters around the text it takes (wrapped, prefix, line, merging a run of lines, fenced, link, or a pattern), and a role, how what it takes is shown (a span, an element or a block); a `TextRuleSet` holds them in order, and at each place the first that matches, and accepts what it found, takes it. Spans nest, and a literal rule keeps what it wraps from the rest. Markdown is no longer built in: UI Next's built-in Markdown is a set of rules like any other.
