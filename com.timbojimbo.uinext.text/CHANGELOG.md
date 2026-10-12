@@ -1,3 +1,9 @@
+## [0.1.1] - 12/10/2026
+
+### Fixed
+
+- A text with no theme of its own lays out with the project's Default Theme (**Project Settings > Timbo Jimbo > UI Next Text**) before the built-in one, as it takes the project's default font: the default theme reached no text. `TextLayout.EffectiveTheme` says which theme a text gets.
+
 ## [0.1.0] - 12/10/2026
 
 UI Text's engine (as of UI Text 0.4.0), moved over to UI Next.

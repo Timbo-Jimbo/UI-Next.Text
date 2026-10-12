@@ -8,7 +8,7 @@ Requires Unity 6000.5 or newer, mobile or desktop.
 
 ## Installation
 
-Open **Window > Package Manager**, click Add, choose **Add package from git URL...** and paste `https://github.com/Timbo-Jimbo/UI-Next.Text.git?path=com.timbojimbo.uinext.text#0.1.0`. UI Next depends on it, so add it before UI Next.
+Open **Window > Package Manager**, click Add, choose **Add package from git URL...** and paste `https://github.com/Timbo-Jimbo/UI-Next.Text.git?path=com.timbojimbo.uinext.text#0.1.1`. UI Next depends on it, so add it before UI Next.
 
 ## How it works
 
@@ -24,7 +24,7 @@ Above the bridge, `TextLayout` does the work without knowing about GameObjects: 
 
 **Settings.** **Edit > Project Settings > Timbo Jimbo > UI Next Text** holds the project defaults: the font stack and theme texts fall back to. Create the asset from that page (it can live anywhere under Assets) or pick an existing one; a project with none registered takes the first it finds. The choice is stored in `ProjectSettings/EditorBuildSettings.asset` and builds preload the asset, so no Resources folder is involved. Edits apply live: `TextSettings.Changed` tells whatever draws text to lay it out again.
 
-**Markup.** With rich text on, a small Markdown dialect applies: `**bold**`, `*italic*`, `__underline__`, `~~strike~~`, `` `code` ``, `[label](url)`, bare URLs, `\` escapes, `#` headings, `-`/`1.` lists, `>` quotes and ``` fenced code blocks. A newline is a line break. No HTML, images or tables, so it is safe for user-generated text. The parser records only source indices; `LayoutText` builds what the engine lays out and keeps the mapping both ways, so a caret or a selection can move between the source and the layout. A `TextTheme` asset (**Create > Timbo Jimbo > UI Next > Text Theme**) sets heading sizes, link and quote colours, the code font stack and the inline handlers.
+**Markup.** With rich text on, a small Markdown dialect applies: `**bold**`, `*italic*`, `__underline__`, `~~strike~~`, `` `code` ``, `[label](url)`, bare URLs, `\` escapes, `#` headings, `-`/`1.` lists, `>` quotes and ``` fenced code blocks. A newline is a line break. No HTML, images or tables, so it is safe for user-generated text. The parser records only source indices; `LayoutText` builds what the engine lays out and keeps the mapping both ways, so a caret or a selection can move between the source and the layout. A `TextTheme` asset (**Create > Timbo Jimbo > UI Next > Text Theme**) sets heading sizes, link and quote colours, the code font stack and the inline handlers; a text with none of its own takes the project's default theme, and without one the built-in defaults.
 
 **Inline content.** `InlineHandler` assets on a theme extend the markup with a trigger (`:emote:`, `@name`), a placement and what to put there. `Fragments` handlers style the text and can put something behind each line it spans; `Block` handlers put one thing across the full width of every line; `Atomic` handlers replace the token with an unbreakable box something sits over, sized in em and centred on the text unless the request says how much of it sits above the baseline. A handler can ask for layout padding: the text either side moves over, as CSS padding on an inline element does, and a span that wraps keeps it at its start and end only.
 

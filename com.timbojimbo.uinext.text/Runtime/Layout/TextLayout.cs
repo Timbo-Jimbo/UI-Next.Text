@@ -182,7 +182,7 @@ namespace TimboJimbo.UINext.Text
             _atomicRequests.Clear();
 
             AtgEngine.Initialize();
-            var theme = input.Theme != null ? input.Theme : TextTheme.Default;
+            var theme = EffectiveTheme(input.Theme);
             var settings = Settings(in input, theme, in context, _decorationRuns, _atomicRequests);
             if (string.IsNullOrEmpty(settings.Text))
             {
@@ -478,7 +478,7 @@ namespace TimboJimbo.UINext.Text
             try
             {
                 AtgEngine.Initialize();
-                var settings = scope.Settings(in input, input.Theme != null ? input.Theme : TextTheme.Default, in context, null, null);
+                var settings = scope.Settings(in input, EffectiveTheme(input.Theme), in context, null, null);
                 var size = scope._handle.MeasurePx(ref settings);
                 // As many lines as a layout keeps (see ApplyOverflow).
                 if (input.MaxLines > 0 && scope._baseFont != null)
@@ -565,6 +565,15 @@ namespace TimboJimbo.UINext.Text
             s_overflowHandle = null;
         };
 #endif
+
+        /// <summary>The theme a text lays out with: its own, else the project default, else the built-in one.</summary>
+        public static TextTheme EffectiveTheme(TextTheme theme)
+        {
+            if (theme != null)
+                return theme;
+            var settings = TextSettings.Instance;
+            return settings != null && settings.DefaultTheme != null ? settings.DefaultTheme : TextTheme.Default;
+        }
 
         /// <summary>The stack a text draws with: its own, else the project default, else the OS default.</summary>
         public static FontStack EffectiveStack(FontStack font)
