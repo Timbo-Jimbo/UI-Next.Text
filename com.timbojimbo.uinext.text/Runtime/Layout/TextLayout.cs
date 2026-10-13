@@ -100,8 +100,11 @@ namespace TimboJimbo.UINext.Text
         private float _fontSizePx;
         private float _widthPx;
         private float _heightPx;
-        private float _topPx;
         private TextAnchor _alignment;
+        // Where the engine's box is in the box given (see OriginPx), and the height the engine was given (negative: none).
+        private Vector2 _origin;
+        private float _engineHeightPx = -1f;
+        private bool _wordWrap;
         private float _paragraphSpacingPx;
         private bool _rightToLeft;
         private bool _generated;
@@ -109,7 +112,6 @@ namespace TimboJimbo.UINext.Text
         private static readonly List<TextLayout> s_measureScopes = new();
         private static readonly List<TextRule> s_rules = new();
         private static int s_measureDepth;
-        private static AtgTextHandle s_overflowHandle;
 
         /// <summary>The text as read: what its rules matched, in source indices.</summary>
         public TextDocument Document => _laidOutDocument ?? _document;
@@ -126,12 +128,16 @@ namespace TimboJimbo.UINext.Text
         public Vector2 SizePx => _handle.SizePx;
 
         /// <summary>
-        /// How far below the top of the box it was given the layout's own box starts, in layout pixels; everything it
-        /// gives in layout pixels (its quads, decorations, rects and query answers) is measured from there. 0 unless
+        /// Where the layout's own box starts in the box it was given, in layout pixels; everything it gives in layout
+        /// pixels (its quads, decorations, rects and query answers) is measured from there. Below the top where
         /// <see cref="TextLayoutInput.MaxLines"/> made its box shorter than the one given, which it then sits in as its
-        /// alignment says: in the middle, or at the bottom.
+        /// alignment says (in the middle, or at the bottom); and where <see cref="Reflow"/> kept a layout made for another
+        /// box, wherever its alignment puts it in this one.
         /// </summary>
-        public float TopPx => _topPx;
+        public Vector2 OriginPx => _origin;
+
+        /// <summary>How far below the top of the box it was given the layout's own box starts (<see cref="OriginPx"/>'s y).</summary>
+        public float TopPx => _origin.y;
 
         /// <summary>True when the last layout cut the text short.</summary>
         public bool IsElided => _handle.IsElided;
@@ -199,6 +205,8 @@ namespace TimboJimbo.UINext.Text
                     _objectSizes.Add(input.ObjectSizes[i]);
 
             _generated = _handle.Generate(ref settings);
+            _engineHeightPx = settings.HeightPx;
+            _wordWrap = input.WordWrap;
             if (!_generated)
                 return false;
 
@@ -206,6 +214,44 @@ namespace TimboJimbo.UINext.Text
             CollectDecorations();
             return true;
         }
+
+        /// <summary>
+        /// Lays the text it last laid out out in another box (<paramref name="input"/>'s width and height), everything
+        /// else in <paramref name="input"/> as it was then but its <see cref="TextLayoutInput.MaxLines"/>' room: where no
+        /// line would wrap or be cut short differently there, the layout is kept and moved where its alignment puts it in
+        /// the new box (<see cref="OriginPx"/>), which costs nothing; otherwise it is laid out again. A layout made with
+        /// no width (<see cref="MeasureAhead"/>'s) is kept in any box at least as wide as its widest line. False when
+        /// there is nothing to draw.
+        /// </summary>
+        public bool Reflow(in TextLayoutInput input) => Move(in input) ? _generated : Generate(in input);
+
+        // Moves the layout to where laying it out in the input's box would put it, when that would lay it out the same.
+        private bool Move(in TextLayoutInput input)
+        {
+            if (!_handle.IsLaidOut) return false;
+            var size = _handle.SizePx;
+            bool elided = _handle.IsElided;
+            // Across: at the width it was laid out at; or, nothing cut short and no line broken by its width, at any width
+            // all its lines fit.
+            float width = input.WidthPx;
+            bool sameWidth = width < 0f ? _widthPx < 0f : _widthPx >= 0f && Px(width) == Px(_widthPx);
+            if (!sameWidth && (elided || (_wordWrap && _widthPx >= 0f) || (width >= 0f && Px(width) < Px(size.x))))
+                return false;
+            // Down: in the height the engine was given; or, nothing cut short, in any height all its lines fit.
+            float height = EngineHeight(in input, size.y, out float top);
+            bool sameHeight = height < 0f ? _engineHeightPx < 0f : _engineHeightPx >= 0f && Px(height) == Px(_engineHeightPx);
+            if (!sameHeight && (elided || (height >= 0f && Px(height) < Px(size.y))))
+                return false;
+            // The engine aligns each line across in its width (the widest line's with none), and the lines down in its height.
+            float across = (int)_alignment % 3 * 0.5f, down = (int)_alignment / 3 * 0.5f;
+            float wasWidth = _widthPx >= 0f ? _widthPx : size.x, nowWidth = width >= 0f ? width : size.x;
+            float wasHeight = _engineHeightPx >= 0f ? _engineHeightPx : size.y, nowHeight = height >= 0f ? height : size.y;
+            _origin = new Vector2((nowWidth - wasWidth) * across, top + (nowHeight - wasHeight) * down);
+            return true;
+        }
+
+        // The engine works in 64ths of a pixel.
+        private static int Px(float px) => Mathf.RoundToInt(px * 64f);
 
         /// <summary>Builds the generator settings and, for a text with rules, the document, layout text and spans.</summary>
         private AtgTextSettings Settings(in TextLayoutInput input, List<DecorationRun> decorations)
@@ -268,41 +314,19 @@ namespace TimboJimbo.UINext.Text
 
         private void ApplyOverflow(ref AtgTextSettings settings, in TextLayoutInput input)
         {
-            float height = -1f;
-            switch (input.Overflow)
+            // Middle and bottom alignment need a box to align in, as tall as the text at least: it is measured here, where
+            // what the engine works out of it is kept for laying it out.
+            float measured = -1f;
+            if (input.Overflow == TextOverflow.Overflow && input.HeightPx >= 0f && settings.VerticalAlignment != AtgVerticalAlignment.Top)
             {
-                case TextOverflow.Ellipsis:
-                    height = input.HeightPx;
-                    break;
-                case TextOverflow.Truncate:
-                    height = input.HeightPx;
-                    settings.Overflow = AtgOverflow.Clip;
-                    break;
-                default:
-                    // Middle and bottom alignment need a box to align in; use the taller of the rect and the text.
-                    if (settings.VerticalAlignment != AtgVerticalAlignment.Top)
-                    {
-                        var measure = settings;
-                        measure.HeightPx = -1f;
-                        s_overflowHandle ??= new AtgTextHandle();
-                        height = Mathf.Max(input.HeightPx, s_overflowHandle.MeasurePx(ref measure).y);
-                    }
-                    break;
+                var measure = settings;
+                measure.HeightPx = -1f;
+                measured = _handle.MeasurePx(ref measure).y;
             }
-
-            if (input.MaxLines > 0 && _baseFont != null)
-            {
-                // Half a pixel under the exact height, so a line whose top lands on the boundary is not counted.
-                float cap = AtgFontAssets.LineHeightPx(_baseFont, input.FontSizePx) * input.MaxLines - 0.5f;
-                height = height < 0f ? cap : Mathf.Min(height, cap);
-                if (input.Overflow == TextOverflow.Overflow)
-                    settings.Overflow = AtgOverflow.Clip;
-                // The engine aligns the lines in the box it is given, now shorter than the one it was given: that box sits
-                // in the given one as the alignment says, so a text held to fewer lines than it has room for is in the
-                // middle, or at the bottom, of it all the same.
-                if (input.HeightPx > height)
-                    _topPx = (input.HeightPx - height) * ((int)input.Alignment / 3) * 0.5f;
-            }
+            float height = EngineHeight(in input, measured, out float top);
+            _origin = new Vector2(0f, top);
+            if (input.Overflow == TextOverflow.Truncate || (input.MaxLines > 0 && _baseFont != null && input.Overflow == TextOverflow.Overflow))
+                settings.Overflow = AtgOverflow.Clip;
 
             // An ellipsis where there is something to cut short: lines past a height, or one line at its width. With neither,
             // the engine, told to, breaks words at any character to make lines (#design after its #), as wrapping text
@@ -311,6 +335,38 @@ namespace TimboJimbo.UINext.Text
                 settings.Overflow = AtgOverflow.Ellipsis;
 
             settings.HeightPx = height;
+        }
+
+        // The height the engine is given to lay a text `measured` tall out in from an input (negative: none), and how far
+        // below the top of the input's box that height starts.
+        private float EngineHeight(in TextLayoutInput input, float measured, out float top)
+        {
+            float height = -1f;
+            switch (input.Overflow)
+            {
+                case TextOverflow.Ellipsis:
+                case TextOverflow.Truncate:
+                    height = input.HeightPx;
+                    break;
+                default:
+                    // Middle and bottom alignment need a box to align in: the taller of the one given and the text.
+                    if (input.HeightPx >= 0f && (int)input.Alignment / 3 != 0)
+                        height = Mathf.Max(input.HeightPx, measured);
+                    break;
+            }
+            top = 0f;
+            if (input.MaxLines > 0 && _baseFont != null)
+            {
+                // Half a pixel under the exact height, so a line whose top lands on the boundary is not counted.
+                float cap = AtgFontAssets.LineHeightPx(_baseFont, input.FontSizePx) * input.MaxLines - 0.5f;
+                height = height < 0f ? cap : Mathf.Min(height, cap);
+                // The engine aligns the lines in the box it is given, now shorter than the one it was given: that box sits
+                // in the given one as the alignment says, so a text held to fewer lines than it has room for is in the
+                // middle, or at the bottom, of it all the same.
+                if (input.HeightPx > height)
+                    top = (input.HeightPx - height) * ((int)input.Alignment / 3) * 0.5f;
+            }
+            return height;
         }
 
         // Where the placeholders were drawn, by their codes.
@@ -470,7 +526,24 @@ namespace TimboJimbo.UINext.Text
             var scope = EnterScope();
             try
             {
-                return scope.MeasureAhead(in input);
+                using var measure = TextProfiling.Measure.Auto();
+                scope.Forget();
+                AtgEngine.Initialize();
+                var settings = scope.Settings(in input, null);
+                Vector2 size;
+                if (scope._layoutText.ObjectCount > 0)
+                {
+                    // Text with objects in it is measured as it is laid out, so it fits the box it is measured for: what is
+                    // laid out there is laid out the same way.
+                    scope._handle.Generate(ref settings);
+                    size = scope.Extent(input.ObjectSizes);
+                    scope._handle.Clear();
+                }
+                else
+                {
+                    size = scope._handle.MeasurePx(ref settings);
+                }
+                return scope.Capped(size, in input);
             }
             finally
             {
@@ -479,36 +552,34 @@ namespace TimboJimbo.UINext.Text
         }
 
         /// <summary>
-        /// The size a text would take laid out from an input, as <see cref="Measure(in TextLayoutInput)"/> gives it, measured
-        /// here ahead of laying it out here: the engine keeps what it worked out of the text (its shaping) for this layout,
-        /// so laying the same text out next, at any width, or measuring it again costs a fraction of the first time, where
-        /// <see cref="Measure(in TextLayoutInput)"/> shares that with every text it measures. It forgets the last layout, as
-        /// generating does: lay the text out before asking anything of it.
+        /// Lays a text out here with no height to fit (as <see cref="Generate"/> with <see cref="TextLayoutInput.HeightPx"/>
+        /// negative) and gives its size, as <see cref="Measure(in TextLayoutInput)"/> does: measuring ahead of drawing. The
+        /// layout is kept, so drawing the text in a box it fits costs nothing more (<see cref="Reflow"/>), and the engine
+        /// keeps what it worked out of the text (its shaping) for this layout, so laying it out again at another width
+        /// costs a fraction of the first time, where <see cref="Measure(in TextLayoutInput)"/> shares that with every text.
         /// </summary>
         public Vector2 MeasureAhead(in TextLayoutInput input)
         {
             using var measure = TextProfiling.Measure.Auto();
-            Forget();
-            if (string.IsNullOrEmpty(input.Text))
-                return Vector2.zero;
-            AtgEngine.Initialize();
-            var settings = Settings(in input, null);
-            Vector2 size;
-            if (_layoutText.ObjectCount > 0)
-            {
-                // Text with objects in it is measured as it is laid out, so it fits the box it is measured for: what is
-                // laid out there is laid out the same way.
-                _handle.Generate(ref settings);
-                size = _handle.SizePx;
-                size.x = Mathf.Max(size.x, WidestBlock(input.ObjectSizes));
-                size.y = Mathf.Max(size.y, BlocksBottom(input.ObjectSizes));
-                _handle.Clear();
-            }
-            else
-            {
-                size = _handle.MeasurePx(ref settings);
-            }
-            // As many lines as a layout keeps (see ApplyOverflow).
+            var unbounded = input;
+            unbounded.HeightPx = -1f;
+            Generate(in unbounded);
+            return _handle.IsLaidOut ? Capped(Extent(input.ObjectSizes), in input) : Vector2.zero;
+        }
+
+        // The size of the text laid out, as wide as its widest block and as tall as its blocks reach.
+        private Vector2 Extent(IReadOnlyList<Vector2> sizes)
+        {
+            var size = _handle.SizePx;
+            if (_layoutText.ObjectCount == 0) return size;
+            size.x = Mathf.Max(size.x, WidestBlock(sizes));
+            size.y = Mathf.Max(size.y, BlocksBottom(sizes));
+            return size;
+        }
+
+        // A size no taller than as many lines as a layout keeps (see EngineHeight).
+        private Vector2 Capped(Vector2 size, in TextLayoutInput input)
+        {
             if (input.MaxLines > 0 && _baseFont != null)
                 size.y = Mathf.Min(size.y, AtgFontAssets.LineHeightPx(_baseFont, input.FontSizePx) * input.MaxLines);
             return size;
@@ -518,7 +589,8 @@ namespace TimboJimbo.UINext.Text
         private void Forget()
         {
             _generated = false;
-            _topPx = 0f;
+            _origin = Vector2.zero;
+            _engineHeightPx = -1f;
             ClearQueries();
             _decorations.Clear();
             _decorationRuns.Clear();
@@ -571,8 +643,6 @@ namespace TimboJimbo.UINext.Text
             foreach (var scope in s_measureScopes)
                 scope.Dispose();
             s_measureScopes.Clear();
-            s_overflowHandle?.Dispose();
-            s_overflowHandle = null;
         };
 #endif
 

@@ -3,11 +3,13 @@
 ### Added
 
 - Profiler markers, in UI Next's category ("UI Next"): reading markup (`UINext.Text.Parse`), laying text out (`UINext.Text.Generate`) and measuring it (`UINext.Text.Measure`).
-- `TextLayout.MeasureAhead`: a text measured with a layout's own engine state, which keeps what it worked out of the text (its shaping), so laying the same text out there next, at any width, costs a fraction of laying it out from nothing.
+- `TextLayout.MeasureAhead`: a text measured by laying it out in a layout, which keeps the layout, so drawing it costs nothing more, and keeps what the engine worked out of the text (its shaping), so laying it out again at another width costs a fraction of the first time.
+- `TextLayout.Reflow`: the text last laid out, laid out in another box. Where nothing in it would wrap or be cut short differently there (a layout made with no width, in a box at least as wide as its widest line, say), it is kept and moved where its alignment puts it, which costs nothing. `TextLayout.OriginPx` says where its own box starts in the box given, as `TopPx` said down alone.
 
 ### Changed
 
 - Reading markup sorts a rule set's rules once, until they or the text settings change, and matches a line marker's pattern (a numbered item's) only where its line starts, rather than looking for it along the line.
+- A text overflowing its box, aligned to its middle or bottom, is measured with its layout's own engine state, which keeps what the engine works out for laying it out, rather than with one shared by every text.
 
 ### Removed
 
