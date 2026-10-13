@@ -67,6 +67,12 @@ namespace TimboJimbo.UINext.Text
         private string _string = "";
         private bool _stringDirty;
         private int _sourceLength;
+        // The source it was built from, and whether it is that source as it is (plain text, or text no rule matched in),
+        // whose string it then is rather than a copy; and the document, at which reading, it was last built from.
+        private string _source = "";
+        private bool _verbatim;
+        private TextDocument _builtFrom;
+        private int _builtVersion;
 
         internal readonly List<LayoutRun> Runs = new();
 
@@ -77,7 +83,7 @@ namespace TimboJimbo.UINext.Text
             {
                 if (_stringDirty)
                 {
-                    _string = _text.ToString();
+                    _string = _verbatim ? _source : _text.ToString();
                     _stringDirty = false;
                 }
                 return _string;
@@ -93,6 +99,7 @@ namespace TimboJimbo.UINext.Text
         public void BuildPlain(string source)
         {
             Clear();
+            _source = source ?? "";
             _sourceLength = source?.Length ?? 0;
             if (_sourceLength > 0)
             {
@@ -102,11 +109,14 @@ namespace TimboJimbo.UINext.Text
             _stringDirty = true;
         }
 
-        /// <summary>Builds the layout text for a parsed document.</summary>
+        /// <summary>Builds the layout text for a parsed document, unless it is built from it as it is read already.</summary>
         public void Build(TextDocument document)
         {
+            if (document == _builtFrom && document.Version == _builtVersion) return;
             Clear();
-            var source = document.Text;
+            _builtFrom = document;
+            _builtVersion = document.Version;
+            var source = _source = document.Text;
             var matches = document.Matches;
             _sourceLength = source.Length;
             for (int m = 0; m < matches.Count; m++)
@@ -158,6 +168,7 @@ namespace TimboJimbo.UINext.Text
                         break;
                 }
             }
+            _verbatim &= _text.Length == _sourceLength;
             _stringDirty = true;
         }
 
@@ -237,6 +248,9 @@ namespace TimboJimbo.UINext.Text
             ObjectCount = 0;
             _string = "";
             _stringDirty = false;
+            _source = "";
+            _verbatim = true;
+            _builtFrom = null;
         }
 
         // Text with no run of its own (a line break), from a source index or put in (-1).
@@ -244,6 +258,10 @@ namespace TimboJimbo.UINext.Text
 
         private void AddPlain(string text, int from, int length, int sourceStart)
         {
+            // The source as it is so far: each piece copied from where it is in it, to where it is in it.
+            if (_verbatim && (sourceStart != _text.Length || sourceStart + length > _source.Length
+                || string.CompareOrdinal(text, from, _source, sourceStart, length) != 0))
+                _verbatim = false;
             _segments.Add(new Segment { LayoutStart = _text.Length, Length = length, SourceStart = sourceStart });
             _text.Append(text, from, length);
         }

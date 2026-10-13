@@ -91,6 +91,9 @@ namespace TimboJimbo.UINext.Text
         /// <summary>The source as given.</summary>
         public string Text { get; private set; } = "";
 
+        // Counts its readings, for what is built from it (a layout text) to see it read again.
+        internal int Version { get; private set; }
+
         /// <summary>What the rules found, in the order they start, each before the matches inside it.</summary>
         public IReadOnlyList<TextMatch> Matches => _matches;
 
@@ -114,6 +117,7 @@ namespace TimboJimbo.UINext.Text
 
         internal void Reset(string source)
         {
+            Version++;
             Text = source ?? "";
             _matches.Clear();
             Pieces.Clear();

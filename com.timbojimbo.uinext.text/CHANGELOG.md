@@ -10,6 +10,7 @@
 
 - Reading markup sorts a rule set's rules once, until they or the text settings change, and matches a line marker's pattern (a numbered item's) only where its line starts, rather than looking for it along the line.
 - A text overflowing its box, aligned to its middle or bottom, is measured with its layout's own engine state, which keeps what the engine works out for laying it out, rather than with one shared by every text.
+- Laying a text out again (at another width, say) builds what the engine is given from its document only when the document was read again, and a text no rule matched in is given to the engine as it is, rather than copied: a feed of cards resizing every frame went from 12 KB of garbage a frame to none.
 
 ### Removed
 
