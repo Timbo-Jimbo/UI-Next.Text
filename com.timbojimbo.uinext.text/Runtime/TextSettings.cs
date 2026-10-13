@@ -48,6 +48,7 @@ namespace TimboJimbo.UINext.Text
         public static void NotifyChanged()
         {
             Version++;
+            Bridge.AtgReplay.Clear();
             Changed?.Invoke();
         }
 

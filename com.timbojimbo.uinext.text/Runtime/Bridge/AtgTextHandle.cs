@@ -40,6 +40,13 @@ namespace TimboJimbo.UINext.Text.Bridge
         private Dictionary<EntityId, HashSet<uint>> _missingGlyphs = new();
         private NativeSpan[] _nativeSpans = Array.Empty<NativeSpan>();
 
+        // Laid out by AtgReplay rather than the engine: its quads and group are its own, and the engine lays the same text
+        // out (Materialize) before answering anything that needs its own state.
+        private bool _replayed;
+        private readonly List<AtgQuad> _replayQuads = new();
+        private AtgQuadGroup _replayGroup;
+        private AtgTextSettings _replaySettings;
+
         private static readonly List<uint> s_glyphsToAdd = new();
 
         /// <summary>True after the last <see cref="Generate"/> cut the text short with an ellipsis.</summary>
@@ -55,9 +62,12 @@ namespace TimboJimbo.UINext.Text.Bridge
         /// </summary>
         public bool IsLaidOut => _laidOut;
 
-        public int GroupCount => _groups.Count;
+        public int GroupCount => _replayed ? 1 : _groups.Count;
 
-        public AtgQuadGroup GetGroup(int index) => _groups[index].Info;
+        public AtgQuadGroup GetGroup(int index) => _replayed ? _replayGroup : _groups[index].Info;
+
+        /// <summary>Whether the last <see cref="Generate"/> was laid out from what the engine did before (AtgReplay).</summary>
+        public bool IsReplayed => _replayed;
 
         /// <summary>
         /// Lays the text out and prepares its quads. Returns false when there is nothing to draw (empty text, no
@@ -67,9 +77,33 @@ namespace TimboJimbo.UINext.Text.Bridge
         public bool Generate(ref AtgTextSettings settings)
         {
             Clear();
-
             if (string.IsNullOrEmpty(settings.Text) || AtgEngine.IsShuttingDown)
                 return false;
+            if (AtgReplay.TryLayOut(ref settings, _replayQuads, out _replayGroup, out var size))
+            {
+                _replayed = true;
+                _replaySettings = settings;
+                _laidOut = true;
+                SizePx = size;
+                return true;
+            }
+            bool drawn = GenerateNative(ref settings);
+            if (drawn)
+                AtgReplay.Learn(ref settings, this);
+            return drawn;
+        }
+
+        // The engine's own layout of a replayed text, for what asks the engine about it.
+        private void Materialize()
+        {
+            if (!_replayed) return;
+            var settings = _replaySettings;
+            Clear();
+            GenerateNative(ref settings);
+        }
+
+        private bool GenerateNative(ref AtgTextSettings settings)
+        {
             if (!Convert(ref settings, out var font, out var fallbacks))
                 return false;
 
@@ -156,6 +190,7 @@ namespace TimboJimbo.UINext.Text.Bridge
         public void Clear()
         {
             _groups.Clear();
+            _replayed = false;
             _laidOut = false;
             IsElided = false;
             SizePx = Vector2.zero;
@@ -164,6 +199,11 @@ namespace TimboJimbo.UINext.Text.Bridge
         /// <summary>Reads one quad of a group produced by the last <see cref="Generate"/>.</summary>
         public void GetQuad(int groupIndex, int quadIndex, out AtgQuad quad)
         {
+            if (_replayed)
+            {
+                quad = _replayQuads[quadIndex];
+                return;
+            }
             var group = _groups[groupIndex];
             var elements = _lastInfo.meshInfos[group.MeshIndex].textElementInfos;
             int element = _indicesByMesh[group.Slot][group.AtlasIndex][quadIndex];
@@ -192,12 +232,30 @@ namespace TimboJimbo.UINext.Text.Bridge
         // top-left corner. With nothing laid out (see IsLaidOut) they answer as for an empty text, never reaching the
         // engine without a layout to ask.
 
-        public int CharacterCount => _laidOut ? TextLib.GetCharacterCount(_info) : 0;
+        public int CharacterCount
+        {
+            get
+            {
+                Materialize();
+                return _laidOut ? TextLib.GetCharacterCount(_info) : 0;
+            }
+        }
 
-        public bool IsRightToLeft => _laidOut && TextLib.IsMainDirectionRTL(_info);
+        public bool IsRightToLeft
+        {
+            get
+            {
+                Materialize();
+                return _laidOut && TextLib.IsMainDirectionRTL(_info);
+            }
+        }
 
         /// <summary>The link id under a point in layout pixels, or -1.</summary>
-        public int LinkAt(Vector2 pointPx) => _laidOut ? TextLib.FindIntersectingLink(pointPx, _info) : -1;
+        public int LinkAt(Vector2 pointPx)
+        {
+            Materialize();
+            return _laidOut ? TextLib.FindIntersectingLink(pointPx, _info) : -1;
+        }
 
         /// <summary>
         /// Rectangles covering the characters in [start, end), in layout pixels: one per line, or in a line whose text
@@ -206,6 +264,7 @@ namespace TimboJimbo.UINext.Text.Bridge
         /// </summary>
         public void GetRangeRects(int start, int end, List<Rect> results)
         {
+            Materialize();
             results.Clear();
             if (!_laidOut || end <= start)
                 return;
@@ -218,7 +277,11 @@ namespace TimboJimbo.UINext.Text.Bridge
         /// The caret's position before a character index, in layout pixels: x at the insertion point, y at the caret's
         /// bottom (y runs down). See <see cref="CaretRectPx"/> for the whole caret.
         /// </summary>
-        public Vector2 CursorPositionPx(int index) => _laidOut ? TextSelectionService.GetCursorPositionFromLogicalIndex(_info, index) : Vector2.zero;
+        public Vector2 CursorPositionPx(int index)
+        {
+            Materialize();
+            return _laidOut ? TextSelectionService.GetCursorPositionFromLogicalIndex(_info, index) : Vector2.zero;
+        }
 
         /// <summary>
         /// The caret before a character index, in layout pixels: zero wide, at the insertion point, rising from its
@@ -228,6 +291,7 @@ namespace TimboJimbo.UINext.Text.Bridge
         /// </summary>
         public Rect CaretRectPx(int index)
         {
+            Materialize();
             if (!_laidOut)
                 return default;
             var bottom = TextSelectionService.GetCursorPositionFromLogicalIndex(_info, index);
@@ -236,19 +300,43 @@ namespace TimboJimbo.UINext.Text.Bridge
         }
 
         /// <summary>The character index nearest a point in layout pixels.</summary>
-        public int IndexAt(Vector2 pointPx) => _laidOut ? TextSelectionService.GetCursorLogicalIndexFromPosition(_info, pointPx) : 0;
+        public int IndexAt(Vector2 pointPx)
+        {
+            Materialize();
+            return _laidOut ? TextSelectionService.GetCursorLogicalIndexFromPosition(_info, pointPx) : 0;
+        }
 
         /// <summary>The line a character is on, counted from 0.</summary>
-        public int LineOf(int index) => _laidOut ? TextSelectionService.GetLineNumber(_info, index) : 0;
+        public int LineOf(int index)
+        {
+            Materialize();
+            return _laidOut ? TextSelectionService.GetLineNumber(_info, index) : 0;
+        }
 
-        public float LineHeightPx(int line) => _laidOut ? TextSelectionService.GetLineHeight(_info, line) : 0f;
+        public float LineHeightPx(int line)
+        {
+            Materialize();
+            return _laidOut ? TextSelectionService.GetLineHeight(_info, line) : 0f;
+        }
 
-        public int FirstIndexOnLine(int index) => _laidOut ? TextSelectionService.GetFirstCharacterIndexOnLine(_info, index) : 0;
+        public int FirstIndexOnLine(int index)
+        {
+            Materialize();
+            return _laidOut ? TextSelectionService.GetFirstCharacterIndexOnLine(_info, index) : 0;
+        }
 
-        public int LastIndexOnLine(int index) => _laidOut ? TextSelectionService.GetLastCharacterIndexOnLine(_info, index) : 0;
+        public int LastIndexOnLine(int index)
+        {
+            Materialize();
+            return _laidOut ? TextSelectionService.GetLastCharacterIndexOnLine(_info, index) : 0;
+        }
 
         /// <summary>How many characters of the last layout fit within a width, for "read more" style truncation.</summary>
-        public int CharactersThatFit(float widthPx) => _laidOut ? TextLib.GetNumCharactersThatFitWithinWidth(_info, Mathf.RoundToInt(widthPx * FixedPoint)) : 0;
+        public int CharactersThatFit(float widthPx)
+        {
+            Materialize();
+            return _laidOut ? TextLib.GetNumCharactersThatFitWithinWidth(_info, Mathf.RoundToInt(widthPx * FixedPoint)) : 0;
+        }
 
         public void Dispose()
         {
