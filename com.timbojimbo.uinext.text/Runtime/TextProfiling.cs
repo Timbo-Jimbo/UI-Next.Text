@@ -9,9 +9,12 @@ namespace TimboJimbo.UINext.Text
     /// </summary>
     internal static class TextProfiling
     {
-        public static readonly ProfilerMarker Parse = new(ProfilerCategory.Gui, "UINext.Text.Parse");
-        public static readonly ProfilerMarker Generate = new(ProfilerCategory.Gui, "UINext.Text.Generate");
-        public static readonly ProfilerMarker Measure = new(ProfilerCategory.Gui, "UINext.Text.Measure");
-        public static readonly ProfilerMarker LongestWord = new(ProfilerCategory.Gui, "UINext.Text.LongestWord");
+        // UI Next's own category, which its markers are in too.
+        private static readonly ProfilerCategory Category = new("UI Next");
+
+        public static readonly ProfilerMarker Parse = new(Category, "UINext.Text.Parse");
+        public static readonly ProfilerMarker Generate = new(Category, "UINext.Text.Generate");
+        public static readonly ProfilerMarker Measure = new(Category, "UINext.Text.Measure");
+        public static readonly ProfilerMarker LongestWord = new(Category, "UINext.Text.LongestWord");
     }
 }
