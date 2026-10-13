@@ -98,7 +98,11 @@ namespace TimboJimbo.UINext.Text
         /// Reads <paramref name="source"/> with <paramref name="rules"/>, in order: at each place the first that matches
         /// takes it (see <see cref="TextRule"/>).
         /// </summary>
-        public void Parse(string source, IReadOnlyList<TextRule> rules) => TextParser.Parse(source, rules, this);
+        public void Parse(string source, IReadOnlyList<TextRule> rules)
+        {
+            using var parse = TextProfiling.Parse.Auto();
+            TextParser.Parse(source, rules, this);
+        }
 
         /// <summary>Takes <paramref name="source"/> as plain text: shown as written, with no matches.</summary>
         public void SetPlain(string source)

@@ -167,6 +167,7 @@ namespace TimboJimbo.UINext.Text
         /// <summary>Lays the text out. False when there was nothing to draw.</summary>
         public bool Generate(in TextLayoutInput input)
         {
+            using var generate = TextProfiling.Generate.Auto();
             _generated = false;
             _topPx = 0f;
             ClearQueries();
@@ -474,6 +475,7 @@ namespace TimboJimbo.UINext.Text
         /// </summary>
         public static Vector2 Measure(in TextLayoutInput input)
         {
+            using var measure = TextProfiling.Measure.Auto();
             if (string.IsNullOrEmpty(input.Text))
                 return Vector2.zero;
             var scope = EnterScope();
@@ -514,6 +516,7 @@ namespace TimboJimbo.UINext.Text
         /// </summary>
         public static float LongestWord(in TextLayoutInput input)
         {
+            using var longest = TextProfiling.LongestWord.Auto();
             if (string.IsNullOrEmpty(input.Text))
                 return 0f;
             var scope = EnterScope();

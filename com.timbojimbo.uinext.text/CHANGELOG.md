@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Added
+
+- Profiler markers: reading markup (`UINext.Text.Parse`), laying text out (`UINext.Text.Generate`) and measuring it (`UINext.Text.Measure`, `UINext.Text.LongestWord`).
+
 ## [0.2.0] - 13/10/2026
 
 ### Added
