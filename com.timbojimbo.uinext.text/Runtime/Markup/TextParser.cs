@@ -628,18 +628,19 @@ namespace TimboJimbo.UINext.Text
         }
 
         /// <summary>A pattern, compiled once; null, warned of once, when it is not a regular expression.</summary>
-        internal static Regex PatternOf(string pattern) => Compile(s_patterns, pattern, pattern);
+        internal static Regex PatternOf(string pattern) => Compile(s_patterns, pattern, anchored: false);
 
         // A line marker's pattern, compiled once to match only where matching starts (\G).
-        private static Regex MarkerPatternOf(string pattern) => Compile(s_markerPatterns, pattern, @"\G(?:" + pattern + ")");
+        private static Regex MarkerPatternOf(string pattern) => Compile(s_markerPatterns, pattern, anchored: true);
 
-        private static Regex Compile(Dictionary<string, Regex> compiled, string pattern, string expression)
+        // The expression is put together only as a pattern is first compiled, so looking one up allocates nothing.
+        private static Regex Compile(Dictionary<string, Regex> compiled, string pattern, bool anchored)
         {
             if (string.IsNullOrEmpty(pattern)) return null;
             if (compiled.TryGetValue(pattern, out var regex)) return regex;
             try
             {
-                regex = new Regex(expression, RegexOptions.CultureInvariant);
+                regex = new Regex(anchored ? @"\G(?:" + pattern + ")" : pattern, RegexOptions.CultureInvariant);
             }
             catch (ArgumentException e)
             {
