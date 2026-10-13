@@ -168,22 +168,12 @@ namespace TimboJimbo.UINext.Text
         public bool Generate(in TextLayoutInput input)
         {
             using var generate = TextProfiling.Generate.Auto();
-            _generated = false;
-            _topPx = 0f;
-            ClearQueries();
-            _decorations.Clear();
-            _decorationRuns.Clear();
-            _objectQuads.Clear();
-            _objectSizes.Clear();
-
+            Forget();
             AtgEngine.Initialize();
             var settings = Settings(in input, _decorationRuns);
+            // Nothing to lay out: the handle has let go of the last text, so neither its size nor its queries answer for it.
             if (string.IsNullOrEmpty(settings.Text))
-            {
-                // Nothing to lay out: the handle lets go of the last text, so neither its size nor its queries answer for it.
-                _handle.Clear();
                 return false;
-            }
 
             if (input.Underline || input.Strikethrough)
             {
@@ -475,32 +465,12 @@ namespace TimboJimbo.UINext.Text
         /// </summary>
         public static Vector2 Measure(in TextLayoutInput input)
         {
-            using var measure = TextProfiling.Measure.Auto();
             if (string.IsNullOrEmpty(input.Text))
                 return Vector2.zero;
             var scope = EnterScope();
             try
             {
-                AtgEngine.Initialize();
-                var settings = scope.Settings(in input, null);
-                Vector2 size;
-                if (scope._layoutText.ObjectCount > 0)
-                {
-                    // Text with objects in it is measured as it is laid out, so it fits the box it is measured for: what is
-                    // laid out there is laid out the same way.
-                    scope._handle.Generate(ref settings);
-                    size = scope._handle.SizePx;
-                    size.x = Mathf.Max(size.x, scope.WidestBlock(input.ObjectSizes));
-                    size.y = Mathf.Max(size.y, scope.BlocksBottom(input.ObjectSizes));
-                }
-                else
-                {
-                    size = scope._handle.MeasurePx(ref settings);
-                }
-                // As many lines as a layout keeps (see ApplyOverflow).
-                if (input.MaxLines > 0 && scope._baseFont != null)
-                    size.y = Mathf.Min(size.y, AtgFontAssets.LineHeightPx(scope._baseFont, input.FontSizePx) * input.MaxLines);
-                return size;
+                return scope.MeasureAhead(in input);
             }
             finally
             {
@@ -509,54 +479,52 @@ namespace TimboJimbo.UINext.Text
         }
 
         /// <summary>
-        /// The widest stretch of a text between spaces, laid out from an input one line to a paragraph, in layout pixels:
-        /// how narrow it can be wrapped before a word would run past its edge, as CSS's min-content width is but breaking
-        /// at spaces only. Taken from the text as laid out, so markup counts as it is drawn: a link by its text, a heading
-        /// at its size, a padded span with its padding, an element or block by its size.
+        /// The size a text would take laid out from an input, as <see cref="Measure(in TextLayoutInput)"/> gives it, measured
+        /// here ahead of laying it out here: the engine keeps what it worked out of the text (its shaping) for this layout,
+        /// so laying the same text out next, at any width, or measuring it again costs a fraction of the first time, where
+        /// <see cref="Measure(in TextLayoutInput)"/> shares that with every text it measures. It forgets the last layout, as
+        /// generating does: lay the text out before asking anything of it.
         /// </summary>
-        public static float LongestWord(in TextLayoutInput input)
+        public Vector2 MeasureAhead(in TextLayoutInput input)
         {
-            using var longest = TextProfiling.LongestWord.Auto();
+            using var measure = TextProfiling.Measure.Auto();
+            Forget();
             if (string.IsNullOrEmpty(input.Text))
-                return 0f;
-            var scope = EnterScope();
-            try
+                return Vector2.zero;
+            AtgEngine.Initialize();
+            var settings = Settings(in input, null);
+            Vector2 size;
+            if (_layoutText.ObjectCount > 0)
             {
-                // Widths alone are read: no box to align in, nothing cut short, no underlines to place.
-                var unwrapped = input;
-                unwrapped.WidthPx = unwrapped.HeightPx = -1f;
-                unwrapped.WordWrap = false;
-                unwrapped.Alignment = TextAnchor.UpperLeft;
-                unwrapped.Overflow = TextOverflow.Overflow;
-                unwrapped.MaxLines = 0;
-                unwrapped.Underline = unwrapped.Strikethrough = false;
-                scope.Generate(in unwrapped);
-                if (!scope._handle.IsLaidOut)
-                    return 0f;
-                // Words as the layout text has them: no-break spaces (padding) hold on to the word they pad.
-                string text = scope._layoutText.Text;
-                float widest = 0f;
-                int start = -1;
-                for (int i = 0; i <= text.Length; i++)
-                {
-                    bool breaks = i == text.Length || BreaksAt(text[i]);
-                    if (!breaks)
-                    {
-                        if (start < 0)
-                            start = i;
-                        continue;
-                    }
-                    if (start >= 0 && scope.Extent(start, i, out float left, out float right, out _, out _))
-                        widest = Mathf.Max(widest, right - left);
-                    start = -1;
-                }
-                // A block is its own width, not its placeholder's.
-                return Mathf.Max(widest, scope.WidestBlock(input.ObjectSizes));
+                // Text with objects in it is measured as it is laid out, so it fits the box it is measured for: what is
+                // laid out there is laid out the same way.
+                _handle.Generate(ref settings);
+                size = _handle.SizePx;
+                size.x = Mathf.Max(size.x, WidestBlock(input.ObjectSizes));
+                size.y = Mathf.Max(size.y, BlocksBottom(input.ObjectSizes));
+                _handle.Clear();
             }
-            finally
+            else
             {
-                s_measureDepth--;
+                size = _handle.MeasurePx(ref settings);
             }
+            // As many lines as a layout keeps (see ApplyOverflow).
+            if (input.MaxLines > 0 && _baseFont != null)
+                size.y = Mathf.Min(size.y, AtgFontAssets.LineHeightPx(_baseFont, input.FontSizePx) * input.MaxLines);
+            return size;
+        }
+
+        // Forgets the last layout: nothing to draw, and its queries answer as for an empty text.
+        private void Forget()
+        {
+            _generated = false;
+            _topPx = 0f;
+            ClearQueries();
+            _decorations.Clear();
+            _decorationRuns.Clear();
+            _objectQuads.Clear();
+            _objectSizes.Clear();
+            _handle.Clear();
         }
 
         // How far down the blocks laid out reach, each from the top of its line: past the text's own height for a block it
@@ -585,10 +553,6 @@ namespace TimboJimbo.UINext.Text
                     widest = Mathf.Max(widest, sizes[run.Match].x);
             return widest;
         }
-
-        // Whether a line may break at a character of the layout text: a space, but not a no-break space (U+00A0, which
-        // padding is, U+2007 or U+202F).
-        private static bool BreaksAt(char c) => char.IsWhiteSpace(c) && c != (char)0x00A0 && c != (char)0x2007 && c != (char)0x202F;
 
         // The measure layout for the depth measuring has reached; leave it by taking s_measureDepth back down.
         private static TextLayout EnterScope()

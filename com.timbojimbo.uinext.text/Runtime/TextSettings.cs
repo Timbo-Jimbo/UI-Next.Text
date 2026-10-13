@@ -45,7 +45,14 @@ namespace TimboJimbo.UINext.Text
         public static event System.Action Changed;
 
         /// <summary>Tells whatever draws text that something it is laid out with has changed.</summary>
-        public static void NotifyChanged() => Changed?.Invoke();
+        public static void NotifyChanged()
+        {
+            Version++;
+            Changed?.Invoke();
+        }
+
+        // Counts the changes, for what keeps what it worked out of rules (the parser's sorted rules) to see one.
+        internal static int Version { get; private set; }
 
 #if UNITY_EDITOR
         /// <summary>Called by the settings page after it changes the registered asset; every text redraws with the new defaults.</summary>

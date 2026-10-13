@@ -2,7 +2,16 @@
 
 ### Added
 
-- Profiler markers, in UI Next's category ("UI Next"): reading markup (`UINext.Text.Parse`), laying text out (`UINext.Text.Generate`) and measuring it (`UINext.Text.Measure`, `UINext.Text.LongestWord`).
+- Profiler markers, in UI Next's category ("UI Next"): reading markup (`UINext.Text.Parse`), laying text out (`UINext.Text.Generate`) and measuring it (`UINext.Text.Measure`).
+- `TextLayout.MeasureAhead`: a text measured with a layout's own engine state, which keeps what it worked out of the text (its shaping), so laying the same text out there next, at any width, costs a fraction of laying it out from nothing.
+
+### Changed
+
+- Reading markup sorts a rule set's rules once, until they or the text settings change, and matches a line marker's pattern (a numbered item's) only where its line starts, rather than looking for it along the line.
+
+### Removed
+
+- `TextLayout.LongestWord`: what draws text no longer asks how narrow it can be wrapped.
 
 ## [0.2.0] - 13/10/2026
 

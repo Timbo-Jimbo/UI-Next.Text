@@ -29,6 +29,10 @@ namespace TimboJimbo.UINext.Text
             public string Source;
             public readonly List<TextRule> LineRules = new();
             public readonly List<TextRule> InlineRules = new();
+            // The rules the line and inline rules were sorted from, and the settings' version then: they are sorted again
+            // only when either changes, as a label reading its text each frame reads it with the same rules.
+            public readonly List<TextRule> SortedFrom = new();
+            public int SortedVersion = -1;
             public readonly List<int> LineStarts = new();
             public readonly List<int> LineEnds = new();
             // The characters an inline trigger can start with; any, with a pattern among them.
@@ -44,6 +48,7 @@ namespace TimboJimbo.UINext.Text
 
         [ThreadStatic] private static State s_state;
         private static readonly Dictionary<string, Regex> s_patterns = new();
+        private static readonly Dictionary<string, Regex> s_markerPatterns = new();
 
         public static void Parse(string source, IReadOnlyList<TextRule> rules, TextDocument doc)
         {
@@ -77,9 +82,16 @@ namespace TimboJimbo.UINext.Text
             s.Source = null;
         }
 
-        // Splits the rules into line rules and inline rules, keeping their order, and notes what inline triggers start with.
+        // Splits the rules into line rules and inline rules, keeping their order, and notes what inline triggers start with;
+        // kept while the rules and the settings are the same.
         private static void Sort(State s, IReadOnlyList<TextRule> rules)
         {
+            if (s.SortedVersion == TextSettings.Version && SameRules(s.SortedFrom, rules)) return;
+            s.SortedVersion = TextSettings.Version;
+            s.SortedFrom.Clear();
+            if (rules != null)
+                for (int i = 0; i < rules.Count; i++)
+                    s.SortedFrom.Add(rules[i]);
             s.LineRules.Clear();
             s.InlineRules.Clear();
             s.HasPatterns = false;
@@ -119,6 +131,16 @@ namespace TimboJimbo.UINext.Text
             }
             s.Starts = starts.ToString();
             s.LiteralRuns = literal.ToString();
+        }
+
+        private static bool SameRules(List<TextRule> sorted, IReadOnlyList<TextRule> rules)
+        {
+            int count = rules != null ? rules.Count : 0;
+            if (sorted.Count != count) return false;
+            for (int i = 0; i < count; i++)
+                if (!ReferenceEquals(sorted[i], rules[i]))
+                    return false;
+            return true;
         }
 
         // Each line's start and end (before its line break); a text ending in a line break ends with an empty line.
@@ -270,7 +292,8 @@ namespace TimboJimbo.UINext.Text
 
             if (!string.IsNullOrEmpty(trigger.Pattern))
             {
-                var regex = PatternOf(trigger.Pattern);
+                // Matched where the line's text starts, or not at all, rather than looked for along the line.
+                var regex = MarkerPatternOf(trigger.Pattern);
                 if (regex == null) return false;
                 var found = regex.Match(src, i, end - i);
                 if (!found.Success || found.Index != i || found.Length == 0) return false;
@@ -286,9 +309,11 @@ namespace TimboJimbo.UINext.Text
                 return true;
             }
             // The marker alone on its line, the space after it gone with nothing to follow: an empty line of a quote.
-            var bare = marker.TrimEnd();
-            if (bare.Length == 0 || bare.Length == marker.Length || !StartsWith(src, i, end, bare)) return false;
-            if (SkipSpaces(src, i + bare.Length, end) != end) return false;
+            int bare = marker.Length;
+            while (bare > 0 && char.IsWhiteSpace(marker[bare - 1]))
+                bare--;
+            if (bare == 0 || bare == marker.Length || i + bare > end || string.CompareOrdinal(src, i, marker, 0, bare) != 0) return false;
+            if (SkipSpaces(src, i + bare, end) != end) return false;
             contentStart = end;
             return true;
         }
@@ -603,20 +628,25 @@ namespace TimboJimbo.UINext.Text
         }
 
         /// <summary>A pattern, compiled once; null, warned of once, when it is not a regular expression.</summary>
-        internal static Regex PatternOf(string pattern)
+        internal static Regex PatternOf(string pattern) => Compile(s_patterns, pattern, pattern);
+
+        // A line marker's pattern, compiled once to match only where matching starts (\G).
+        private static Regex MarkerPatternOf(string pattern) => Compile(s_markerPatterns, pattern, @"\G(?:" + pattern + ")");
+
+        private static Regex Compile(Dictionary<string, Regex> compiled, string pattern, string expression)
         {
             if (string.IsNullOrEmpty(pattern)) return null;
-            if (s_patterns.TryGetValue(pattern, out var regex)) return regex;
+            if (compiled.TryGetValue(pattern, out var regex)) return regex;
             try
             {
-                regex = new Regex(pattern, RegexOptions.CultureInvariant);
+                regex = new Regex(expression, RegexOptions.CultureInvariant);
             }
             catch (ArgumentException e)
             {
                 Debug.LogWarning($"UI Next Text: \"{pattern}\" is not a regular expression ({e.Message}), so its rule matches nothing.");
                 regex = null;
             }
-            s_patterns[pattern] = regex;
+            compiled[pattern] = regex;
             return regex;
         }
 
