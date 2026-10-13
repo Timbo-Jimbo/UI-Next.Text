@@ -113,7 +113,6 @@ namespace TimboJimbo.UINext.Text.Bridge
             if (!s_faces.TryGetValue(key, out var face) || face.Broken || face.LineHeight < 0f) return false;
             if (font.atlasTextures == null || font.atlasTextures.Length == 0 || font.atlasTextures[0] != face.Atlas) return false;
             var text = s.Text;
-            var table = font.glyphLookupTable;
             quads.Clear();
             float x = 0f;
             for (int i = 0; i < text.Length; i++)
@@ -121,7 +120,8 @@ namespace TimboJimbo.UINext.Text.Bridge
                 char c = text[i];
                 if (!face.Glyphs.TryGetValue(c, out var glyph)) return false;
                 // The atlas made again moves glyphs: what was learned of one no longer where it was is not used.
-                if (!table.TryGetValue((uint)glyph.Id, out var atlasGlyph) || atlasGlyph == null || !atlasGlyph.glyphRect.Equals(glyph.Rect)) return false;
+                var atlasGlyph = font.GetGlyphInCache((uint)glyph.Id);
+                if (atlasGlyph == null || atlasGlyph.glyphRect != glyph.Rect) return false;
                 if (i == 0)
                 {
                     if (!glyph.HasHead) return false;
@@ -173,7 +173,6 @@ namespace TimboJimbo.UINext.Text.Bridge
                 s_faces[key] = face;
             }
             if (face.Broken || face.Atlas != info.Atlas) return;
-            var table = font.glyphLookupTable;
             var size = handle.SizePx;
             if (face.LineHeight >= 0f && face.LineHeight != size.y) { face.Broken = true; return; }
             face.LineHeight = size.y;
@@ -184,7 +183,8 @@ namespace TimboJimbo.UINext.Text.Bridge
                 handle.GetQuad(0, i, out var quad);
                 // A glyph of the face's own font, as it is in its atlas now; a character is always the same glyph, or the
                 // engine shapes in ways the replay does not (a contextual form), and the face is not replayed.
-                if (!table.TryGetValue((uint)quad.GlyphId, out var atlasGlyph) || atlasGlyph == null) return;
+                var atlasGlyph = font.GetGlyphInCache((uint)quad.GlyphId);
+                if (atlasGlyph == null) return;
                 var topLeft = quad.TopLeft.Position;
                 var glyph = new Glyph
                 {
@@ -235,7 +235,7 @@ namespace TimboJimbo.UINext.Text.Bridge
         }
 
         private static bool SameShape(in Glyph a, in Glyph b) =>
-            a.Id == b.Id && a.Rect.Equals(b.Rect) && a.BottomLeft == b.BottomLeft && a.TopRight == b.TopRight && a.BottomRight == b.BottomRight
+            a.Id == b.Id && a.Rect == b.Rect && a.BottomLeft == b.BottomLeft && a.TopRight == b.TopRight && a.BottomRight == b.BottomRight
             && a.Top == b.Top && a.UvBottomLeft == b.UvBottomLeft && a.UvTopRight == b.UvTopRight && a.Dilate == b.Dilate;
 
         private static int PairOf(char a, char b) => (a << 16) | b;
