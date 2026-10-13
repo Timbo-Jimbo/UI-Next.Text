@@ -5,6 +5,7 @@
 - Profiler markers, in UI Next's category ("UI Next"): reading markup (`UINext.Text.Parse`), laying text out (`UINext.Text.Generate`) and measuring it (`UINext.Text.Measure`).
 - `TextLayout.MeasureAhead`: a text measured by laying it out in a layout, which keeps the layout, so drawing it costs nothing more, and keeps what the engine worked out of the text (its shaping), so laying it out again at another width costs a fraction of the first time.
 - `TextLayout.Reflow`: the text last laid out, laid out in another box. Where nothing in it would wrap or be cut short differently there (a layout made with no width, in a box at least as wide as its widest line, say), it is kept and moved where its alignment puts it, which costs nothing. `TextLayout.OriginPx` says where its own box starts in the box given, as `TopPx` said down alone.
+- Experimental (`AtgReplay`): plain text of one line is laid out without the engine, from what the engine did with the same font and size before: each character's quad and where it starts and ends a line, and how far apart each pair of characters stands, learned as the engine lays plain texts out, so a replayed text is placed exactly where the engine would put it. Anything else (spans, other scripts, wrapping, bold faces, a character or pair not yet seen, a face the engine once disagreed with) goes to the engine, and so does a query that needs the engine's own state. On a Pixel 8 a counter changing every frame lays out in 72 rather than 216 µs.
 
 ### Changed
 
