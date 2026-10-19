@@ -1,7 +1,7 @@
 {
 	"name": "com.timbojimbo.uinext.text",
 	"displayName": "UI Next Text",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"unity": "6000.5",
 	"description": "Text for UI Next, laid out by Unity's Advanced Text Generator: HarfBuzz shaping, ICU line breaking and bidi, OS font fallback and colour emoji; font stacks of OS families and project fonts; markup read by rules of your own, as spans, elements and blocks; and the caret, line and direction queries editing needs.",
 	"dependencies": {},

@@ -8,7 +8,7 @@ namespace TimboJimboEditor.UINext.Text
     /// <summary>
     /// Edit > Project Settings > Timbo Jimbo > UI Next Text: picks the active <see cref="TextSettings"/> asset and
     /// edits its fields in place. The choice is an EditorBuildSettings config object, so it lives in
-    /// ProjectSettings and <see cref="TextSettingsBuild"/> can preload the asset into builds.
+    /// ProjectSettings and <see cref="PreloadTextDependenciesInBuild"/> can preload the asset into builds.
     /// </summary>
     internal static class TextSettingsProvider
     {

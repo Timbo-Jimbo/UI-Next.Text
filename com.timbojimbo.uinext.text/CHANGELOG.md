@@ -1,3 +1,13 @@
+## [0.3.1] - 19/10/2026
+
+### Fixed
+
+- Colour emoji from a font stack's Emoji fonts (the bundled Noto Color Emoji) draw in players. TextCore makes a colour font asset with its sprite shader, found by name, and makes none, without a word, when the shader is missing; nothing shipped it, so in a player the emoji fonts never resolved and emoji fell through to the OS fonts, which on Android 13 and later is a COLRv1 font the engine cannot draw: the replacement character drew instead. Builds now preload the sprite shader, and the distance field shader every other font asset made from a font needs, so neither depends on something else shipping it.
+
+### Changed
+
+- The editor build step that preloads what texts need in a player is `PreloadTextDependenciesInBuild`, rather than `TextSettingsBuild`.
+
 ## [0.3.0] - 14/10/2026
 
 ### Added

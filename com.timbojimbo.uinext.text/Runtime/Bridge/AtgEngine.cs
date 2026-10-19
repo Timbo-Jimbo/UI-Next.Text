@@ -28,8 +28,8 @@ namespace TimboJimbo.UINext.Text.Bridge
         /// <summary>
         /// Creates the generator if needed, with the engine's ICU data (line breaking, bidi, emoji sequences): the
         /// editor's built-in copy, or in a player the copy every build preloads (the editor package's
-        /// TextSettingsBuild), which Unity's own lookup finds loaded. Without it the native side falls back to basic
-        /// line breaking, and emoji sequences may not render correctly.
+        /// PreloadTextDependenciesInBuild), which Unity's own lookup finds loaded. Without it the native side falls back
+        /// to basic line breaking, and emoji sequences may not render correctly.
         /// </summary>
         public static void Initialize()
         {
